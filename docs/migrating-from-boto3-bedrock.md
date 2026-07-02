@@ -9,6 +9,16 @@ want to route that code to an OpenAI-compatible provider.
 python -m pip install "git+https://github.com/alexkrasov/bedmock.git"
 ```
 
+For local development against a cloned checkout, source the setup script from your app directory:
+
+```bash
+cd /path/to/app
+source /path/to/bedmock/setup.sh
+```
+
+This creates or activates the app's `.venv` and installs the local Bedmock checkout in editable
+mode.
+
 ## Minimal Import Change
 
 For the smallest migration, change only the import:

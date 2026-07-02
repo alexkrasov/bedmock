@@ -239,20 +239,21 @@ The legacy `bedrock-bridge` console command remains available during the rename 
 ```bash
 git clone git@github.com:alexkrasov/bedmock.git
 cd bedmock
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[dev]"
-pytest
+source setup.sh
 ```
 
-Useful verification commands:
+`setup.sh` creates and activates `.venv`, installs Bedmock in editable dev mode, and runs a quick
+offline check. For the full local gate:
 
 ```bash
-ruff check .
-ruff format --check .
-mypy bedmock bedrock_bridge
-pytest
-python -m build
+BEDMOCK_RUN_CHECKS=full source setup.sh
+```
+
+For an app that consumes a local Bedmock checkout:
+
+```bash
+cd /path/to/app
+source /path/to/bedmock/setup.sh
 ```
 
 ## Documentation
