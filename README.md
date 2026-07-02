@@ -3,8 +3,10 @@
 Bedmock is a Python compatibility facade for code that already uses the supported Bedrock Runtime
 shape of `boto3.client("bedrock-runtime")`.
 
-It lets you keep Bedrock-shaped request code while routing inference to OpenAI-compatible provider
-profiles such as OpenAI, Gemini, OpenRouter, or Groq.
+It lets you keep Bedrock-shaped request code while routing inference through provider transports.
+The first built-in transport targets OpenAI-compatible chat-completions APIs and ships profiles for
+OpenAI, Gemini, OpenRouter, and Groq. The architecture is deliberately modular: new Bedrock source
+schemas, provider profiles, and non-OpenAI-compatible transports are separate extension points.
 
 ## Status
 
@@ -90,6 +92,25 @@ import bedmock as boto3
 llm = boto3.client("bedrock-runtime")
 s3 = boto3.client("s3")
 ```
+
+## Modular Architecture
+
+Bedmock is built around a small canonical request/response model, so each part of the compatibility
+problem stays isolated:
+
+- **Bedrock operation codecs** implement the public runtime methods such as `converse`,
+  `converse_stream`, `invoke_model`, and `count_tokens`.
+- **Model-family codecs** translate Bedrock-native payload families such as Anthropic Messages,
+  Amazon Nova, Titan Text, Meta Llama, Mistral, and generic prompt payloads.
+- **Provider profiles** describe provider-specific endpoints, headers, API-key environment
+  variables, capability flags, and model overrides without changing Python code.
+- **Provider transports** send canonical requests to a provider API. Bedmock ships an
+  `openai_chat_completions` transport for OpenAI-compatible APIs and can load additional transports
+  from Python entry points.
+
+That means a new OpenAI-compatible provider can usually be added as JSON. A provider with a
+different API shape can be added by implementing a transport plugin while reusing the Bedrock
+operation layer, source codecs, canonical model, routing, error handling, and streaming machinery.
 
 ## Environment Setup
 

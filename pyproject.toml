@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bedmock"
 version = "0.1.0"
-description = "A Bedrock Runtime compatibility facade for OpenAI-compatible LLM providers."
+description = "A modular Bedrock Runtime compatibility facade for alternate LLM providers."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

@@ -35,6 +35,10 @@ Implemented codecs:
 Provider transports send canonical requests to external model providers. The first transport is
 `openai_chat_completions`, implemented with raw `httpx` and JSON/SSE handling.
 
+Additional transports can be registered by installed packages through the
+`bedrock_bridge.transports` entry-point group. This keeps non-OpenAI-compatible provider APIs out of
+the Bedrock operation and source-codec layers.
+
 The pipeline is:
 
 ```text
