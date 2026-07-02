@@ -1,0 +1,96 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bedmock"
+version = "0.1.0"
+description = "A Bedrock Runtime compatibility facade for OpenAI-compatible LLM providers."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Alex Krasov" }]
+dependencies = [
+  "botocore>=1.34",
+  "httpx>=0.27",
+]
+keywords = ["bedrock", "boto3", "openai", "gemini", "openrouter", "groq", "compatibility", "mock"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/alexkrasov/bedmock"
+Repository = "https://github.com/alexkrasov/bedmock"
+Issues = "https://github.com/alexkrasov/bedmock/issues"
+
+[project.optional-dependencies]
+aws = ["boto3>=1.34"]
+yaml = ["PyYAML>=6"]
+dev = [
+  "build>=1.2",
+  "mypy>=1.10",
+  "pytest>=8",
+  "pytest-cov>=5",
+  "ruff>=0.5",
+  "twine>=5",
+]
+
+[project.scripts]
+bedmock = "bedrock_bridge.cli.main:main"
+bedrock-bridge = "bedrock_bridge.cli.main:main"
+
+[project.entry-points."bedrock_bridge.codecs"]
+anthropic_messages = "bedrock_bridge.codecs.anthropic_messages:AnthropicMessagesCodec"
+anthropic_legacy = "bedrock_bridge.codecs.anthropic_legacy:AnthropicLegacyCodec"
+meta_llama = "bedrock_bridge.codecs.meta_llama:MetaLlamaCodec"
+mistral = "bedrock_bridge.codecs.mistral:MistralCodec"
+amazon_titan_text = "bedrock_bridge.codecs.amazon_titan_text:AmazonTitanTextCodec"
+amazon_nova = "bedrock_bridge.codecs.amazon_nova:AmazonNovaCodec"
+generic_prompt = "bedrock_bridge.codecs.generic_prompt:GenericPromptCodec"
+
+[project.entry-points."bedrock_bridge.transports"]
+openai_chat_completions = "bedrock_bridge.transports.openai_chat_completions:OpenAIChatCompletionsTransport"
+
+[tool.setuptools.packages.find]
+include = ["bedmock*", "bedrock_bridge*"]
+
+[tool.setuptools.package-data]
+bedmock = ["py.typed"]
+bedrock_bridge = ["py.typed", "provider_profiles/*.json"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["B008"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["bedmock", "bedrock_bridge"]
+strict = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+disallow_subclassing_any = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "integration_openai: opt-in live OpenAI integration tests",
+  "integration_gemini: opt-in live Gemini integration tests",
+  "integration_openrouter: opt-in live OpenRouter integration tests",
+  "integration_groq: opt-in live Groq integration tests",
+]

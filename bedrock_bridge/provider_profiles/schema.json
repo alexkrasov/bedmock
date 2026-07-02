@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["id", "transport", "base_url", "endpoint_path", "api_key_env", "capabilities"],
+  "properties": {
+    "id": {"type": "string"},
+    "transport": {"type": "string"},
+    "base_url": {"type": "string"},
+    "endpoint_path": {"type": "string"},
+    "api_key_env": {"type": "array", "items": {"type": "string"}},
+    "default_headers": {"type": "object"},
+    "optional_headers": {"type": "object"},
+    "capabilities": {"type": "object"},
+    "parameter_policy": {"type": "object"},
+    "output_token_parameter": {"type": "object"},
+    "model_overrides": {"type": "array"}
+  }
+}

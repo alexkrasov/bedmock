@@ -1,0 +1,30 @@
+{
+  "id": "openai",
+  "transport": "openai_chat_completions",
+  "base_url": "https://api.openai.com/v1",
+  "endpoint_path": "/chat/completions",
+  "api_key_env": ["OPENAI_API_KEY"],
+  "default_headers": {},
+  "capabilities": {
+    "chat_completions": true,
+    "streaming": true,
+    "tools": "model_dependent",
+    "vision": "model_dependent",
+    "structured_output": "model_dependent",
+    "reasoning": "model_dependent",
+    "token_counting": "model_dependent"
+  },
+  "parameter_policy": {
+    "omit_null_values": true,
+    "unsupported": []
+  },
+  "output_token_parameter": {
+    "default": "max_tokens",
+    "model_rules": [
+      {
+        "model_regex": "^(o[0-9]|o[0-9]-|gpt-5|gpt-5\\.)",
+        "parameter": "max_completion_tokens"
+      }
+    ]
+  }
+}
