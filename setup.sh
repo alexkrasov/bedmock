@@ -16,8 +16,6 @@
 #   BEDMOCK_SETUP_MODE=runtime|dev        # default: runtime for apps, dev for Bedmock
 #   BEDMOCK_RUN_CHECKS=quick|full|false   # default: quick
 #
-# Legacy BEDROCK_BRIDGE_* setup variable names are accepted as fallbacks.
-#
 # This script is intentionally sourced, not executed, so the virtualenv stays
 # active in the caller's shell after setup completes.
 
@@ -29,7 +27,7 @@
 
 _BEDMOCK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _CALLER_DIR="$(pwd)"
-_APP_DIR_RAW="${BEDMOCK_APP_DIR:-${BEDROCK_BRIDGE_APP_DIR:-}}"
+_APP_DIR_RAW="${BEDMOCK_APP_DIR:-}"
 if [ -n "${_APP_DIR_RAW}" ]; then
   _APP_DIR="$(cd "${_APP_DIR_RAW}" 2>/dev/null && pwd)"
 else
@@ -40,8 +38,8 @@ if [ -z "${_APP_DIR}" ]; then
   return 1
 fi
 
-_VENV_DIR="${BEDMOCK_VENV_DIR:-${BEDROCK_BRIDGE_VENV_DIR:-${_APP_DIR}/.venv}}"
-_SETUP_MODE_RAW="${BEDMOCK_SETUP_MODE:-${BEDROCK_BRIDGE_SETUP_MODE:-}}"
+_VENV_DIR="${BEDMOCK_VENV_DIR:-${_APP_DIR}/.venv}"
+_SETUP_MODE_RAW="${BEDMOCK_SETUP_MODE:-}"
 if [ -n "${_SETUP_MODE_RAW}" ]; then
   _MODE="${_SETUP_MODE_RAW}"
 elif [ "${_APP_DIR}" = "${_BEDMOCK_ROOT}" ]; then
@@ -49,9 +47,9 @@ elif [ "${_APP_DIR}" = "${_BEDMOCK_ROOT}" ]; then
 else
   _MODE="runtime"
 fi
-_RUN_CHECKS="${BEDMOCK_RUN_CHECKS:-${BEDROCK_BRIDGE_RUN_CHECKS:-quick}}"
-_FORCE_INSTALL="${BEDMOCK_FORCE_INSTALL:-${BEDROCK_BRIDGE_FORCE_INSTALL:-false}}"
-_REQ_DIR_RAW="${BEDMOCK_REQUIREMENTS_DIR:-${BEDROCK_BRIDGE_EXERCISE_DIR:-}}"
+_RUN_CHECKS="${BEDMOCK_RUN_CHECKS:-quick}"
+_FORCE_INSTALL="${BEDMOCK_FORCE_INSTALL:-false}"
+_REQ_DIR_RAW="${BEDMOCK_REQUIREMENTS_DIR:-}"
 
 case "$(uname -s 2>/dev/null)" in
   Linux*)               _OS="linux" ;;
@@ -231,7 +229,7 @@ elif [ "${_RUN_CHECKS}" = "full" ] && [ "${_APP_DIR}" = "${_BEDMOCK_ROOT}" ] && 
   cd "${_BEDMOCK_ROOT}" || return 1
   if ! ruff check .; then return 1; fi
   if ! ruff format --check .; then return 1; fi
-  if ! mypy bedmock bedrock_bridge; then return 1; fi
+  if ! mypy bedmock; then return 1; fi
   if ! python -m pytest -q; then return 1; fi
   _BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bedmock-build.XXXXXX")"
   if ! python -m build --no-isolation --outdir "${_BUILD_DIR}"; then return 1; fi

@@ -41,31 +41,31 @@ dev = [
   "pytest>=8",
   "pytest-cov>=5",
   "ruff>=0.5",
+  "setuptools>=77",
   "twine>=5",
+  "wheel",
 ]
 
 [project.scripts]
-bedmock = "bedrock_bridge.cli.main:main"
-bedrock-bridge = "bedrock_bridge.cli.main:main"
+bedmock = "bedmock.cli.main:main"
 
-[project.entry-points."bedrock_bridge.codecs"]
-anthropic_messages = "bedrock_bridge.codecs.anthropic_messages:AnthropicMessagesCodec"
-anthropic_legacy = "bedrock_bridge.codecs.anthropic_legacy:AnthropicLegacyCodec"
-meta_llama = "bedrock_bridge.codecs.meta_llama:MetaLlamaCodec"
-mistral = "bedrock_bridge.codecs.mistral:MistralCodec"
-amazon_titan_text = "bedrock_bridge.codecs.amazon_titan_text:AmazonTitanTextCodec"
-amazon_nova = "bedrock_bridge.codecs.amazon_nova:AmazonNovaCodec"
-generic_prompt = "bedrock_bridge.codecs.generic_prompt:GenericPromptCodec"
+[project.entry-points."bedmock.codecs"]
+anthropic_messages = "bedmock.codecs.anthropic_messages:AnthropicMessagesCodec"
+anthropic_legacy = "bedmock.codecs.anthropic_legacy:AnthropicLegacyCodec"
+meta_llama = "bedmock.codecs.meta_llama:MetaLlamaCodec"
+mistral = "bedmock.codecs.mistral:MistralCodec"
+amazon_titan_text = "bedmock.codecs.amazon_titan_text:AmazonTitanTextCodec"
+amazon_nova = "bedmock.codecs.amazon_nova:AmazonNovaCodec"
+generic_prompt = "bedmock.codecs.generic_prompt:GenericPromptCodec"
 
-[project.entry-points."bedrock_bridge.transports"]
-openai_chat_completions = "bedrock_bridge.transports.openai_chat_completions:OpenAIChatCompletionsTransport"
+[project.entry-points."bedmock.transports"]
+openai_chat_completions = "bedmock.transports.openai_chat_completions:OpenAIChatCompletionsTransport"
 
 [tool.setuptools.packages.find]
-include = ["bedmock*", "bedrock_bridge*"]
+include = ["bedmock*"]
 
 [tool.setuptools.package-data]
-bedmock = ["py.typed"]
-bedrock_bridge = ["py.typed", "provider_profiles/*.json"]
+bedmock = ["py.typed", "provider_profiles/*.json"]
 
 [tool.ruff]
 line-length = 100
@@ -80,7 +80,7 @@ quote-style = "double"
 
 [tool.mypy]
 python_version = "3.10"
-packages = ["bedmock", "bedrock_bridge"]
+packages = ["bedmock"]
 strict = true
 warn_unused_ignores = true
 ignore_missing_imports = true

@@ -27,18 +27,8 @@ python -m pip install "bedmock[aws] @ git+https://github.com/alexkrasov/bedmock.
 
 ## Basic Usage
 
-For new code, import Bedmock directly:
-
 ```python
 import bedmock as boto3
-
-client = boto3.client("bedrock-runtime")
-```
-
-For existing code that already adopted the earlier namespace, this remains supported:
-
-```python
-import bedrock_bridge as boto3
 
 client = boto3.client("bedrock-runtime")
 ```
@@ -63,7 +53,7 @@ by applications that call:
 Other AWS services raise `NotImplementedError` unless explicit delegation is enabled:
 
 ```bash
-export BEDROCK_BRIDGE_DELEGATE_OTHER_SERVICES=true
+export BEDMOCK_DELEGATE_OTHER_SERVICES=true
 ```
 
 For applications that also use S3, EC2, or other AWS services, install the optional AWS extra so
@@ -115,38 +105,37 @@ operation layer, source codecs, canonical model, routing, error handling, and st
 
 ## Environment Setup
 
-Bedmock keeps the `BEDROCK_BRIDGE_*` environment variable names for compatibility with existing
-users.
+Bedmock uses the `BEDMOCK_*` environment variable prefix.
 
 Gemini:
 
 ```bash
-export BEDROCK_BRIDGE_PROVIDER=gemini
-export BEDROCK_BRIDGE_MODEL="<current-gemini-model>"
+export BEDMOCK_PROVIDER=gemini
+export BEDMOCK_MODEL="<current-gemini-model>"
 export GEMINI_API_KEY="<secret>"
 ```
 
 OpenAI:
 
 ```bash
-export BEDROCK_BRIDGE_PROVIDER=openai
-export BEDROCK_BRIDGE_MODEL="<current-openai-model>"
+export BEDMOCK_PROVIDER=openai
+export BEDMOCK_MODEL="<current-openai-model>"
 export OPENAI_API_KEY="<secret>"
 ```
 
 OpenRouter:
 
 ```bash
-export BEDROCK_BRIDGE_PROVIDER=openrouter
-export BEDROCK_BRIDGE_MODEL="<provider/model-slug>"
+export BEDMOCK_PROVIDER=openrouter
+export BEDMOCK_MODEL="<provider/model-slug>"
 export OPENROUTER_API_KEY="<secret>"
 ```
 
 Groq:
 
 ```bash
-export BEDROCK_BRIDGE_PROVIDER=groq
-export BEDROCK_BRIDGE_MODEL="<current-groq-model>"
+export BEDMOCK_PROVIDER=groq
+export BEDMOCK_MODEL="<current-groq-model>"
 export GROQ_API_KEY="<secret>"
 ```
 
@@ -178,7 +167,6 @@ Create `bedmock.json` in the working directory or point `BEDMOCK_CONFIG` at a fi
 }
 ```
 
-`BEDROCK_BRIDGE_CONFIG` and `bedrock-bridge.json` remain supported as legacy compatibility paths.
 Route priority is exact `model_id`, glob, regex, default route, then environment fallback. Multiple
 matches at the same priority are configuration errors.
 
@@ -197,7 +185,7 @@ reference or contract coverage.
 
 ## Supported Operations
 
-| Bedrock method | Bridge support level | Provider limitations | Fallback behavior |
+| Bedrock method | Bedmock support level | Provider limitations | Fallback behavior |
 | --- | --- | --- | --- |
 | `invoke_model` | Implemented | Depends on source codec and target provider capabilities | Validation error before network when schema is unsupported |
 | `invoke_model_with_response_stream` | Implemented | Requires provider streaming | Capability/provider errors surface as `ClientError` |
@@ -231,8 +219,6 @@ bedmock show-capabilities "<provider-id>"
 ```
 
 `doctor` does not run paid inference.
-
-The legacy `bedrock-bridge` console command remains available during the rename transition.
 
 ## Local Development
 

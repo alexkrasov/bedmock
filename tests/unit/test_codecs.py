@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from bedrock_bridge.canonical import CanonicalResponse, CanonicalTextBlock, CanonicalUsage
-from bedrock_bridge.codecs import DEFAULT_CODEC_REGISTRY
-from bedrock_bridge.exceptions import ValidationException
+from bedmock.canonical import CanonicalResponse, CanonicalTextBlock, CanonicalUsage
+from bedmock.codecs import DEFAULT_CODEC_REGISTRY
+from bedmock.exceptions import ValidationException
 
 
 @pytest.mark.parametrize(

@@ -42,8 +42,8 @@ Bedmock does not load `.env` files automatically. Either export the needed varia
 or load them in your application before creating the client.
 
 ```bash
-export BEDROCK_BRIDGE_PROVIDER=gemini
-export BEDROCK_BRIDGE_MODEL="<current-gemini-model>"
+export BEDMOCK_PROVIDER=gemini
+export BEDMOCK_MODEL="<current-gemini-model>"
 export GEMINI_API_KEY="<secret>"
 ```
 
@@ -70,15 +70,5 @@ AWS extra and enable delegation:
 
 ```bash
 python -m pip install "bedmock[aws] @ git+https://github.com/alexkrasov/bedmock.git"
-export BEDROCK_BRIDGE_DELEGATE_OTHER_SERVICES=true
+export BEDMOCK_DELEGATE_OTHER_SERVICES=true
 ```
-
-## Legacy Namespace
-
-The earlier `bedrock_bridge` import namespace remains available:
-
-```python
-import bedrock_bridge as boto3
-```
-
-New code should prefer `bedmock`.

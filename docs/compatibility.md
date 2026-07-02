@@ -6,12 +6,9 @@ The following imports work:
 
 ```python
 import bedmock as boto3
-import bedrock_bridge as boto3
 from bedmock import client
 from bedmock import Session
-from bedrock_bridge import client
-from bedrock_bridge import Session
-from bedrock_bridge.session import Session
+from bedmock.session import Session
 ```
 
 Supported client creation:
@@ -43,7 +40,7 @@ If the application needs the one-line drop-in import, install the AWS extra and 
 
 ```bash
 python -m pip install "bedmock[aws] @ git+https://github.com/alexkrasov/bedmock.git"
-export BEDROCK_BRIDGE_DELEGATE_OTHER_SERVICES=true
+export BEDMOCK_DELEGATE_OTHER_SERVICES=true
 ```
 
 Then `import bedmock as boto3` keeps `bedrock-runtime` on Bedmock and sends other service clients

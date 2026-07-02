@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from bedrock_bridge.canonical import (
+from bedmock.canonical import (
     CanonicalRequest,
     CanonicalResponse,
     CanonicalStreamEvent,
@@ -30,7 +30,7 @@ class FakeTransport:
         return CanonicalResponse(
             id="chatcmpl-test",
             model=target_model,
-            content=[CanonicalTextBlock("bridge ok")],
+            content=[CanonicalTextBlock("bedmock ok")],
             finish_reason="end_turn",
             usage=CanonicalUsage(input_tokens=3, output_tokens=2, total_tokens=5),
             provider_request_id="req-test",
@@ -45,7 +45,7 @@ class FakeTransport:
         self.requests.append(request)
         yield CanonicalStreamEvent("message_start", 0)
         yield CanonicalStreamEvent("content_block_start", 1, 0, "text")
-        yield CanonicalStreamEvent("content_block_delta", 2, 0, "text", text_delta="bridge")
+        yield CanonicalStreamEvent("content_block_delta", 2, 0, "text", text_delta="bedmock")
         yield CanonicalStreamEvent("content_block_delta", 3, 0, "text", text_delta=" ok")
         yield CanonicalStreamEvent("content_block_stop", 4, 0)
         usage = CanonicalUsage(input_tokens=3, output_tokens=2, total_tokens=5)
@@ -62,10 +62,10 @@ class FakeTransport:
 
 
 @pytest.fixture()
-def bridge_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+def bedmock_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("BEDROCK_BRIDGE_PROVIDER", "openai")
-    monkeypatch.setenv("BEDROCK_BRIDGE_MODEL", "gpt-test")
+    monkeypatch.setenv("BEDMOCK_PROVIDER", "openai")
+    monkeypatch.setenv("BEDMOCK_MODEL", "gpt-test")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
 
@@ -76,7 +76,7 @@ def fake_transport(monkeypatch: pytest.MonkeyPatch) -> FakeTransport:
     def build_transport(*args: Any, **kwargs: Any) -> FakeTransport:
         return transport
 
-    client_module = importlib.import_module("bedrock_bridge.client")
+    client_module = importlib.import_module("bedmock.client")
     monkeypatch.setattr(client_module, "build_transport", build_transport)
     return transport
 

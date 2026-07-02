@@ -6,11 +6,11 @@ from typing import Any
 
 import pytest
 
-from bedrock_bridge.canonical import CanonicalRequest, CanonicalResponse, CanonicalStreamEvent
-from bedrock_bridge.exceptions import ConfigurationError
-from bedrock_bridge.provider_profiles import ProviderProfile
-from bedrock_bridge.transports.base import ProviderTransport
-from bedrock_bridge.transports.registry import build_transport, list_transport_ids
+from bedmock.canonical import CanonicalRequest, CanonicalResponse, CanonicalStreamEvent
+from bedmock.exceptions import ConfigurationError
+from bedmock.provider_profiles import ProviderProfile
+from bedmock.transports.base import ProviderTransport
+from bedmock.transports.registry import build_transport, list_transport_ids
 
 
 @dataclass
@@ -24,7 +24,7 @@ class FakeEntryPoint:
 
 class FakeEntryPoints(list[FakeEntryPoint]):
     def select(self, *, group: str) -> FakeEntryPoints:
-        if group == "bedrock_bridge.transports":
+        if group == "bedmock.transports":
             return self
         return FakeEntryPoints()
 
@@ -65,7 +65,7 @@ class CustomTransport(ProviderTransport):
 
 def test_registry_lists_external_transport_entry_points(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "bedrock_bridge.transports.registry.metadata.entry_points",
+        "bedmock.transports.registry.metadata.entry_points",
         lambda: FakeEntryPoints([FakeEntryPoint("custom_transport", CustomTransport)]),
     )
 
@@ -74,7 +74,7 @@ def test_registry_lists_external_transport_entry_points(monkeypatch: pytest.Monk
 
 def test_registry_builds_external_transport_entry_point(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "bedrock_bridge.transports.registry.metadata.entry_points",
+        "bedmock.transports.registry.metadata.entry_points",
         lambda: FakeEntryPoints([FakeEntryPoint("custom_transport", CustomTransport)]),
     )
     profile = ProviderProfile(
@@ -93,7 +93,7 @@ def test_registry_builds_external_transport_entry_point(monkeypatch: pytest.Monk
 
 def test_registry_rejects_ambiguous_external_transports(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "bedrock_bridge.transports.registry.metadata.entry_points",
+        "bedmock.transports.registry.metadata.entry_points",
         lambda: FakeEntryPoints(
             [
                 FakeEntryPoint("custom_transport", CustomTransport),

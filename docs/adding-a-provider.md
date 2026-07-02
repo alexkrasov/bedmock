@@ -4,7 +4,7 @@ Bedmock separates provider identity from provider transport.
 
 If the provider exposes an OpenAI-compatible chat-completions API, add it with a JSON provider
 profile. If the provider has a different API shape, implement a custom transport and expose it
-through the `bedrock_bridge.transports` Python entry-point group.
+through the `bedmock.transports` Python entry-point group.
 
 ## OpenAI-Compatible Provider Profile
 
@@ -29,7 +29,7 @@ Optional fields:
 Place custom profiles in a directory and set:
 
 ```bash
-export BEDROCK_BRIDGE_PROVIDER_PROFILE_PATH=/path/to/provider-profiles
+export BEDMOCK_PROVIDER_PROFILE_PATH=/path/to/provider-profiles
 ```
 
 Do not store API keys in provider profiles. Use environment variables.
@@ -68,12 +68,12 @@ returning estimates.
 ## Custom Provider Transport
 
 A non-OpenAI-compatible provider needs a transport implementation that satisfies
-`bedrock_bridge.transports.base.ProviderTransport`.
+`bedmock.transports.base.ProviderTransport`.
 
 Register it from your package with the existing entry-point group:
 
 ```toml
-[project.entry-points."bedrock_bridge.transports"]
+[project.entry-points."bedmock.transports"]
 my_provider = "my_package.transport:MyProviderTransport"
 ```
 

@@ -12,5 +12,5 @@ Built-in provider-native strategies currently cover:
 
 ## Rationale
 
-Approximate token counts would be misleading in cost and quota-sensitive code. The bridge must not
+Approximate token counts would be misleading in cost and quota-sensitive code. Bedmock must not
 run paid inference only to estimate token counts.

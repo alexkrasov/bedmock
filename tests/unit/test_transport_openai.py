@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from bedrock_bridge.canonical import (
+from bedmock.canonical import (
     CanonicalImageBlock,
     CanonicalMessage,
     CanonicalRequest,
@@ -14,10 +14,10 @@ from bedrock_bridge.canonical import (
     CanonicalTool,
     CanonicalToolChoice,
 )
-from bedrock_bridge.canonical.usage import CanonicalUsage
-from bedrock_bridge.exceptions import ServiceUnavailableException, UnsupportedOperationException
-from bedrock_bridge.provider_profiles import load_provider_profile
-from bedrock_bridge.transports.openai_chat_completions import OpenAIChatCompletionsTransport
+from bedmock.canonical.usage import CanonicalUsage
+from bedmock.exceptions import ServiceUnavailableException, UnsupportedOperationException
+from bedmock.provider_profiles import load_provider_profile
+from bedmock.transports.openai_chat_completions import OpenAIChatCompletionsTransport
 
 
 def _request() -> CanonicalRequest:

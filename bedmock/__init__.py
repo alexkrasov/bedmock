@@ -1,9 +1,8 @@
-"""Public Bedmock facade.
+"""Drop-in facade for supported boto3 Bedrock Runtime calls."""
 
-Bedmock keeps `bedrock_bridge` as a compatibility namespace and exposes the same
-drop-in Bedrock Runtime facade from the shorter project name.
-"""
-
-from bedrock_bridge import Session, __version__, client, session
+from . import session
+from .facade import client
+from .session import Session
+from .version import __version__
 
 __all__ = ["Session", "__version__", "client", "session"]

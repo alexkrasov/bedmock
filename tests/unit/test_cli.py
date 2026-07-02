@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from bedrock_bridge.cli.doctor import doctor
-from bedrock_bridge.cli.main import main
+from bedmock.cli.doctor import doctor
+from bedmock.cli.main import main
 
 
 def test_doctor_reports_configuration_error_without_crashing(
@@ -25,8 +25,8 @@ def test_doctor_cli_loads_explicit_env_file(
         "\n".join(
             [
                 "BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0",
-                "BEDROCK_BRIDGE_PROVIDER=gemini",
-                "BEDROCK_BRIDGE_MODEL=gemini-test",
+                "BEDMOCK_PROVIDER=gemini",
+                "BEDMOCK_MODEL=gemini-test",
                 "GEMINI_API_KEY=secret",
             ]
         ),

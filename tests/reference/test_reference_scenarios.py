@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from bedrock_bridge.config import BridgeConfig
-from bedrock_bridge.operations.base import OperationContext
-from bedrock_bridge.operations.converse import ConverseOperationCodec
-from bedrock_bridge.operations.count_tokens import CountTokensOperationCodec
-from bedrock_bridge.operations.invoke_model import InvokeModelOperationCodec
-from bedrock_bridge.provider_profiles import load_provider_profile
-from bedrock_bridge.routing import RouteResolution
+from bedmock.config import BedmockConfig
+from bedmock.operations.base import OperationContext
+from bedmock.operations.converse import ConverseOperationCodec
+from bedmock.operations.count_tokens import CountTokensOperationCodec
+from bedmock.operations.invoke_model import InvokeModelOperationCodec
+from bedmock.provider_profiles import load_provider_profile
+from bedmock.routing import RouteResolution
 
 from . import (
     anthropic_messages_basic,
@@ -22,7 +22,7 @@ from . import (
 def _context() -> OperationContext:
     return OperationContext(
         operation_name="test",
-        bridge_config=BridgeConfig(provider="openai", model="gpt-test"),
+        bedmock_config=BedmockConfig(provider="openai", model="gpt-test"),
         route=RouteResolution("openai", "gpt-test", None, "test"),
         provider=load_provider_profile("openai"),
         request_id="req-test",

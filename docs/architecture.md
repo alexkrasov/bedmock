@@ -40,7 +40,7 @@ exact `token_counting` strategy, and the transport either calls that provider-na
 raises `UnsupportedOperationException`. Approximate counts are not part of the transport contract.
 
 Additional transports can be registered by installed packages through the
-`bedrock_bridge.transports` entry-point group. This keeps non-OpenAI-compatible provider APIs out of
+`bedmock.transports` entry-point group. This keeps non-OpenAI-compatible provider APIs out of
 the Bedrock operation and source-codec layers.
 
 The pipeline is:

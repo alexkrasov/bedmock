@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from bedrock_bridge.exceptions import ValidationException
-from bedrock_bridge.transports.sse import iter_sse_data, iter_sse_json
+from bedmock.exceptions import ValidationException
+from bedmock.transports.sse import iter_sse_data, iter_sse_json
 
 
 def test_sse_parser_handles_comments_fragments_and_done() -> None:

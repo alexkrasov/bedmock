@@ -6,7 +6,7 @@ Core uses raw `httpx` instead of `openai-python`.
 
 ## Rationale
 
-The OpenAI SDK is convenient for single-provider application code, but the bridge needs:
+The OpenAI SDK is convenient for single-provider application code, but Bedmock needs:
 
 - a provider-independent canonical model
 - Bedrock request and response conversion
