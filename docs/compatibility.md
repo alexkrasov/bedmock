@@ -59,6 +59,15 @@ payload = json.loads(response["body"].read())
 
 Converse responses expose `output.message.content`, `stopReason`, `usage`, and `ResponseMetadata`.
 
+## CountTokens Compatibility
+
+`count_tokens` returns Bedrock-shaped `{"inputTokens": ...}` responses when the selected provider
+profile has an exact preflight counter. Built-in exact support currently covers OpenAI and Gemini.
+
+Providers without an exact configured counter raise `UnsupportedOperationException`; Bedmock does
+not return approximate counts. Usage metadata from normal inference responses is still mapped when
+providers return it.
+
 ## Unsupported Operations
 
 The following are stable diagnostic stubs:

@@ -6,6 +6,7 @@ import json
 import re
 from collections.abc import Iterator, Sequence
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -20,6 +21,7 @@ from bedrock_bridge.canonical import (
     CanonicalResponseFormat,
     CanonicalStreamEvent,
     CanonicalTextBlock,
+    CanonicalToolChoice,
     CanonicalToolResultBlock,
     CanonicalToolUseBlock,
     CanonicalUsage,
@@ -212,9 +214,365 @@ class OpenAIChatCompletionsTransport:
         provider: ProviderProfile,
         target_model: str,
     ) -> int:
+        strategy = str(provider.token_counting.get("strategy") or "")
+        if strategy == "openai_responses_input_tokens":
+            return self._count_openai_responses_input_tokens(request, provider, target_model)
+        if strategy == "gemini_count_tokens":
+            return self._count_gemini_tokens(request, provider, target_model)
         raise UnsupportedOperationException(
-            "Exact token counting is not available for this OpenAI-compatible profile "
-            "without a provider-native counting endpoint or tokenizer plugin.",
+            f"Exact token counting is not configured for provider {provider.id!r}. "
+            "Add a provider-native token_counting strategy or custom transport; "
+            "approximate counts are intentionally not returned.",
+            operation_name=str(request.metadata.get("operation", "CountTokens")),
+        )
+
+    def _count_openai_responses_input_tokens(
+        self,
+        request: CanonicalRequest,
+        provider: ProviderProfile,
+        target_model: str,
+    ) -> int:
+        endpoint_path = str(
+            provider.token_counting.get("endpoint_path") or "/responses/input_tokens"
+        )
+        url = provider.base_url.rstrip("/") + "/" + endpoint_path.lstrip("/")
+        data = self._post_json(
+            url=url,
+            headers=self._headers(provider),
+            payload=self._openai_count_tokens_payload(request, target_model),
+            operation_name=str(request.metadata.get("operation", "CountTokens")),
+        )
+        return self._extract_token_count(data, "input_tokens", "inputTokens")
+
+    def _count_gemini_tokens(
+        self,
+        request: CanonicalRequest,
+        provider: ProviderProfile,
+        target_model: str,
+    ) -> int:
+        data = self._post_json(
+            url=self._gemini_count_tokens_url(provider, target_model),
+            headers=self._gemini_headers(provider),
+            payload=self._gemini_count_tokens_payload(request),
+            operation_name=str(request.metadata.get("operation", "CountTokens")),
+        )
+        return self._extract_token_count(data, "totalTokens", "total_tokens")
+
+    def _post_json(
+        self,
+        *,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        operation_name: str,
+    ) -> dict[str, Any]:
+        def send() -> httpx.Response:
+            return self._client.post(url, headers=headers, json=payload)
+
+        try:
+            response = with_retries(send, max_retries=self.max_retries)
+            raise_for_provider_status(response, operation_name)
+            data = response.json()
+        except Exception as exc:
+            if isinstance(exc, ValidationException):
+                raise
+            mapped = map_network_error(exc, operation_name)
+            raise mapped from exc
+        if not isinstance(data, dict):
+            raise ValidationException("Provider token count response must be a JSON object")
+        return data
+
+    def _extract_token_count(self, data: dict[str, Any], *field_names: str) -> int:
+        for field_name in field_names:
+            value = data.get(field_name)
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+        fields = ", ".join(field_names)
+        raise ValidationException(f"Provider token count response missing integer field: {fields}")
+
+    def _openai_count_tokens_payload(
+        self,
+        request: CanonicalRequest,
+        target_model: str,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": target_model,
+            "input": self._responses_input(request),
+        }
+        instructions = self._responses_instructions(request)
+        if instructions:
+            payload["instructions"] = instructions
+        if request.tools:
+            payload["tools"] = self._responses_tools(request)
+        text_format = self._responses_text_format(request.response_format)
+        if text_format:
+            payload["text"] = text_format
+        return payload
+
+    def _responses_input(self, request: CanonicalRequest) -> list[dict[str, Any]]:
+        return [self._responses_message(message, request) for message in request.messages]
+
+    def _responses_message(
+        self,
+        message: CanonicalMessage,
+        request: CanonicalRequest,
+    ) -> dict[str, Any]:
+        if message.role == "tool":
+            self._raise_count_tokens_unsupported(
+                request,
+                "OpenAI Responses token counting for tool-result history is not mapped yet.",
+            )
+        return {
+            "type": "message",
+            "role": message.role,
+            "content": self._responses_content(message.content, request),
+        }
+
+    def _responses_content(
+        self,
+        blocks: Sequence[CanonicalContentBlock],
+        request: CanonicalRequest,
+    ) -> list[dict[str, Any]]:
+        parts: list[dict[str, Any]] = []
+        for block in blocks:
+            if isinstance(block, CanonicalTextBlock):
+                parts.append({"type": "input_text", "text": block.text})
+            elif isinstance(block, CanonicalImageBlock):
+                image_url = block.url
+                if block.data_base64:
+                    image_url = f"data:{block.media_type};base64,{block.data_base64}"
+                if not image_url:
+                    raise ValidationException("OpenAI image input requires image data or URL")
+                part: dict[str, Any] = {"type": "input_image", "image_url": image_url}
+                if block.detail:
+                    part["detail"] = block.detail
+                parts.append(part)
+            elif isinstance(block, CanonicalJsonBlock):
+                parts.append(
+                    {"type": "input_text", "text": json.dumps(block.value, ensure_ascii=False)}
+                )
+            elif isinstance(block, CanonicalReasoningBlock):
+                parts.append({"type": "input_text", "text": block.text})
+            elif isinstance(block, CanonicalToolUseBlock | CanonicalToolResultBlock):
+                self._raise_count_tokens_unsupported(
+                    request,
+                    "OpenAI Responses token counting for tool-call history is not mapped yet.",
+                )
+        if not parts:
+            parts.append({"type": "input_text", "text": ""})
+        return parts
+
+    def _responses_instructions(self, request: CanonicalRequest) -> str:
+        for block in request.system:
+            if isinstance(
+                block,
+                CanonicalImageBlock | CanonicalToolUseBlock | CanonicalToolResultBlock,
+            ):
+                self._raise_count_tokens_unsupported(
+                    request,
+                    "OpenAI Responses token counting supports text-only system instructions.",
+                )
+        return self._tool_result_content(request.system)
+
+    def _responses_tools(self, request: CanonicalRequest) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "name": tool.name,
+                "description": tool.description or "",
+                "parameters": tool.input_schema,
+            }
+            for tool in request.tools
+        ]
+
+    def _responses_text_format(
+        self,
+        response_format: CanonicalResponseFormat | None,
+    ) -> dict[str, Any] | None:
+        if response_format is None or response_format.mode == "text":
+            return None
+        if response_format.mode == "json_object":
+            return {"format": {"type": "json_object"}}
+        if response_format.mode == "json_schema":
+            json_schema: dict[str, Any] = {
+                "type": "json_schema",
+                "name": response_format.name or "response",
+                "schema": response_format.schema or {},
+            }
+            if response_format.strict is not None:
+                json_schema["strict"] = response_format.strict
+            return {"format": json_schema}
+        return None
+
+    def _gemini_count_tokens_url(self, provider: ProviderProfile, target_model: str) -> str:
+        base_url = str(
+            provider.token_counting.get("base_url")
+            or provider.base_url.rstrip("/").removesuffix("/openai")
+        )
+        model_path = (
+            target_model if target_model.startswith("models/") else f"models/{target_model}"
+        )
+        return base_url.rstrip("/") + "/" + quote(model_path, safe="/") + ":countTokens"
+
+    def _gemini_headers(self, provider: ProviderProfile) -> dict[str, str]:
+        api_key = provider.api_key()
+        if not api_key:
+            keys = ", ".join(provider.api_key_env)
+            raise AccessDeniedException(f"Missing API key. Set one of: {keys}")
+        return {
+            "x-goog-api-key": api_key,
+            "Content-Type": "application/json",
+            **provider.headers(),
+        }
+
+    def _gemini_count_tokens_payload(self, request: CanonicalRequest) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "contents": [self._gemini_content(message, request) for message in request.messages],
+        }
+        if request.system:
+            payload["systemInstruction"] = {
+                "role": "system",
+                "parts": self._gemini_parts(request.system, request, allow_images=False),
+            }
+        if request.tools:
+            payload["tools"] = self._gemini_tools(request)
+        tool_config = self._gemini_tool_config(request.tool_choice)
+        if tool_config:
+            payload["toolConfig"] = tool_config
+        generation_config = self._gemini_generation_config(request)
+        if generation_config:
+            payload["generationConfig"] = generation_config
+        return payload
+
+    def _gemini_content(
+        self,
+        message: CanonicalMessage,
+        request: CanonicalRequest,
+    ) -> dict[str, Any]:
+        if message.role == "user":
+            role = "user"
+        elif message.role == "assistant":
+            role = "model"
+        else:
+            self._raise_count_tokens_unsupported(
+                request,
+                "Gemini token counting for system/tool messages inside conversation history "
+                "is not mapped yet.",
+            )
+        return {
+            "role": role,
+            "parts": self._gemini_parts(message.content, request, allow_images=True),
+        }
+
+    def _gemini_parts(
+        self,
+        blocks: Sequence[CanonicalContentBlock],
+        request: CanonicalRequest,
+        *,
+        allow_images: bool,
+    ) -> list[dict[str, Any]]:
+        parts: list[dict[str, Any]] = []
+        for block in blocks:
+            if isinstance(block, CanonicalTextBlock):
+                parts.append({"text": block.text})
+            elif isinstance(block, CanonicalJsonBlock):
+                parts.append({"text": json.dumps(block.value, ensure_ascii=False)})
+            elif isinstance(block, CanonicalReasoningBlock):
+                parts.append({"text": block.text})
+            elif isinstance(block, CanonicalImageBlock):
+                if not allow_images:
+                    self._raise_count_tokens_unsupported(
+                        request,
+                        "Gemini token counting supports text-only system instructions.",
+                    )
+                if block.data_base64:
+                    parts.append(
+                        {
+                            "inlineData": {
+                                "mimeType": block.media_type,
+                                "data": block.data_base64,
+                            }
+                        }
+                    )
+                elif block.url:
+                    parts.append(
+                        {
+                            "fileData": {
+                                "mimeType": block.media_type,
+                                "fileUri": block.url,
+                            }
+                        }
+                    )
+                else:
+                    raise ValidationException("Gemini image input requires image data or URL")
+            elif isinstance(block, CanonicalToolUseBlock | CanonicalToolResultBlock):
+                self._raise_count_tokens_unsupported(
+                    request,
+                    "Gemini token counting for tool-call history is not mapped yet.",
+                )
+        if not parts:
+            parts.append({"text": ""})
+        return parts
+
+    def _gemini_tools(self, request: CanonicalRequest) -> list[dict[str, Any]]:
+        return [
+            {
+                "functionDeclarations": [
+                    {
+                        "name": tool.name,
+                        "description": tool.description or "",
+                        "parameters": tool.input_schema,
+                    }
+                    for tool in request.tools
+                ]
+            }
+        ]
+
+    def _gemini_tool_config(
+        self,
+        tool_choice: CanonicalToolChoice | None,
+    ) -> dict[str, Any] | None:
+        if tool_choice is None:
+            return None
+        mode_map = {
+            "none": "NONE",
+            "auto": "AUTO",
+            "required": "ANY",
+            "any": "ANY",
+            "specific": "ANY",
+        }
+        function_calling_config: dict[str, Any] = {"mode": mode_map[tool_choice.mode]}
+        if tool_choice.mode == "specific" and tool_choice.tool_name:
+            function_calling_config["allowedFunctionNames"] = [tool_choice.tool_name]
+        return {"functionCallingConfig": function_calling_config}
+
+    def _gemini_generation_config(self, request: CanonicalRequest) -> dict[str, Any]:
+        config: dict[str, Any] = {}
+        if request.max_output_tokens is not None:
+            config["maxOutputTokens"] = request.max_output_tokens
+        if request.temperature is not None:
+            config["temperature"] = request.temperature
+        if request.top_p is not None:
+            config["topP"] = request.top_p
+        if request.top_k is not None:
+            config["topK"] = request.top_k
+        if request.stop_sequences:
+            config["stopSequences"] = request.stop_sequences
+        if request.response_format:
+            if request.response_format.mode == "json_object":
+                config["responseMimeType"] = "application/json"
+            elif request.response_format.mode == "json_schema":
+                config["responseMimeType"] = "application/json"
+                config["responseSchema"] = request.response_format.schema or {}
+        return config
+
+    def _raise_count_tokens_unsupported(
+        self,
+        request: CanonicalRequest,
+        message: str,
+    ) -> None:
+        raise UnsupportedOperationException(
+            message,
             operation_name=str(request.metadata.get("operation", "CountTokens")),
         )
 

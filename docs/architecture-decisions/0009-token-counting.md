@@ -5,6 +5,11 @@
 `count_tokens` returns exact counts only. If no exact provider endpoint, official tokenizer, or
 registered plugin is available, it raises `UnsupportedOperationException`.
 
+Built-in provider-native strategies currently cover:
+
+- OpenAI via the Responses input-token counting endpoint.
+- Gemini via `models/{model}:countTokens`.
+
 ## Rationale
 
 Approximate token counts would be misleading in cost and quota-sensitive code. The bridge must not

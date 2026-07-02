@@ -103,7 +103,8 @@ problem stays isolated:
 - **Model-family codecs** translate Bedrock-native payload families such as Anthropic Messages,
   Amazon Nova, Titan Text, Meta Llama, Mistral, and generic prompt payloads.
 - **Provider profiles** describe provider-specific endpoints, headers, API-key environment
-  variables, capability flags, and model overrides without changing Python code.
+  variables, capability flags, model overrides, and exact token-counting strategies without
+  changing Python code.
 - **Provider transports** send canonical requests to a provider API. Bedmock ships an
   `openai_chat_completions` transport for OpenAI-compatible APIs and can load additional transports
   from Python entry points.
@@ -202,7 +203,21 @@ reference or contract coverage.
 | `invoke_model_with_response_stream` | Implemented | Requires provider streaming | Capability/provider errors surface as `ClientError` |
 | `converse` | Implemented through a separate operation codec | Tool, image, and structured output support is model-dependent | Strict mode rejects unknown capability |
 | `converse_stream` | Implemented with ConverseStream taxonomy | Usage appears only if provider emits it | Missing usage remains absent |
-| `count_tokens` | Framework implemented | Exact counting only; no approximate counts | `UnsupportedOperationException` unless exact strategy exists |
+| `count_tokens` | Implemented for exact strategies | OpenAI and Gemini have built-in provider-native counters; OpenRouter and Groq do not expose one in Bedmock yet | `UnsupportedOperationException` when no exact strategy exists |
+
+## Token Counting
+
+Bedmock implements Bedrock `CountTokens` as exact preflight counting only. It never estimates with
+character counts and never runs paid inference just to infer usage.
+
+Built-in exact strategies:
+
+- `openai`: uses OpenAI's Responses input-token counting endpoint.
+- `gemini`: uses Gemini's native `models/{model}:countTokens` endpoint.
+
+`openrouter` and `groq` still expose usage from normal inference responses when the provider returns
+it, but standalone `client.count_tokens(...)` raises `UnsupportedOperationException` because no
+exact preflight counter is configured for those profiles.
 
 ## CLI
 
@@ -259,6 +274,6 @@ raw model payloads from logs and exception messages. TLS verification is enabled
 - Bedrock Guardrails operations are explicit non-goals.
 - Async Bedrock jobs are explicit non-goals.
 - Bedrock control plane and Agents Runtime are not implemented.
-- Token counting is unsupported unless an exact provider endpoint, official tokenizer, or plugin is
-  registered.
+- Token counting requires an exact provider endpoint, official tokenizer, or custom transport
+  strategy. Built-in exact strategies currently cover OpenAI and Gemini.
 - Provider/model capabilities marked `model_dependent` are attempted only in compatibility mode.

@@ -23,6 +23,7 @@ Optional fields:
 - `optional_headers`
 - `parameter_policy`
 - `output_token_parameter`
+- `token_counting`
 - `model_overrides`
 
 Place custom profiles in a directory and set:
@@ -32,6 +33,37 @@ export BEDROCK_BRIDGE_PROVIDER_PROFILE_PATH=/path/to/provider-profiles
 ```
 
 Do not store API keys in provider profiles. Use environment variables.
+
+## Exact Token Counting
+
+`count_tokens` must return exact provider counts. Do not wire approximate character or tokenizer
+guesses into this path.
+
+For an OpenAI-compatible provider that exposes a Responses-style input-token endpoint, add a
+profile strategy:
+
+```json
+{
+  "token_counting": {
+    "strategy": "openai_responses_input_tokens",
+    "endpoint_path": "/responses/input_tokens"
+  }
+}
+```
+
+For a Gemini-compatible native counter, use:
+
+```json
+{
+  "token_counting": {
+    "strategy": "gemini_count_tokens",
+    "base_url": "https://generativelanguage.googleapis.com/v1beta"
+  }
+}
+```
+
+If a provider has a different exact counting API, implement it in a custom transport rather than
+returning estimates.
 
 ## Custom Provider Transport
 

@@ -20,5 +20,9 @@
   },
   "output_token_parameter": {
     "default": "max_tokens"
+  },
+  "token_counting": {
+    "strategy": "gemini_count_tokens",
+    "base_url": "https://generativelanguage.googleapis.com/v1beta"
   }
 }

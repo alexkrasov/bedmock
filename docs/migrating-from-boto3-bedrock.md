@@ -22,6 +22,9 @@ client = boto3.client("bedrock-runtime")
 
 The existing Bedrock-shaped call can keep using `invoke_model`, `invoke_model_with_response_stream`,
 `converse`, `converse_stream`, or `count_tokens` when the source payload shape is supported.
+Standalone `count_tokens` uses exact provider-native counting for the built-in OpenAI and Gemini
+profiles. OpenRouter and Groq response usage is still mapped after inference, but preflight
+`count_tokens` raises `UnsupportedOperationException` until an exact strategy is configured.
 
 ## Provider Configuration
 

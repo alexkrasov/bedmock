@@ -27,6 +27,7 @@ class ProviderProfile:
     capabilities: dict[str, Any] = field(default_factory=dict)
     parameter_policy: dict[str, Any] = field(default_factory=dict)
     output_token_parameter: dict[str, Any] = field(default_factory=dict)
+    token_counting: dict[str, Any] = field(default_factory=dict)
     model_overrides: list[dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -70,6 +71,7 @@ def _profile_from_dict(raw: dict[str, Any]) -> ProviderProfile:
         capabilities=dict(raw.get("capabilities", {})),
         parameter_policy=dict(raw.get("parameter_policy", {})),
         output_token_parameter=dict(raw.get("output_token_parameter", {})),
+        token_counting=dict(raw.get("token_counting", {})),
         model_overrides=list(raw.get("model_overrides", [])),
     )
 

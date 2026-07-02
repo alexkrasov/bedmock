@@ -26,5 +26,9 @@
         "parameter": "max_completion_tokens"
       }
     ]
+  },
+  "token_counting": {
+    "strategy": "openai_responses_input_tokens",
+    "endpoint_path": "/responses/input_tokens"
   }
 }

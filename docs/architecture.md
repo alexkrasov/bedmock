@@ -35,6 +35,10 @@ Implemented codecs:
 Provider transports send canonical requests to external model providers. The first transport is
 `openai_chat_completions`, implemented with raw `httpx` and JSON/SSE handling.
 
+Provider-native token counting is also resolved at this layer. Provider profiles can declare an
+exact `token_counting` strategy, and the transport either calls that provider-native counter or
+raises `UnsupportedOperationException`. Approximate counts are not part of the transport contract.
+
 Additional transports can be registered by installed packages through the
 `bedrock_bridge.transports` entry-point group. This keeps non-OpenAI-compatible provider APIs out of
 the Bedrock operation and source-codec layers.
@@ -52,5 +56,5 @@ Bedrock operation
   -> Bedrock-compatible response
 ```
 
-No layer contains a codec-by-provider matrix. Provider differences live in JSON profiles and in the
-transport contract.
+No layer contains a codec-by-provider matrix. Provider differences live in JSON profiles, exact
+token-counting strategy declarations, and in the transport contract.

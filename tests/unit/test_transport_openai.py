@@ -15,7 +15,7 @@ from bedrock_bridge.canonical import (
     CanonicalToolChoice,
 )
 from bedrock_bridge.canonical.usage import CanonicalUsage
-from bedrock_bridge.exceptions import ServiceUnavailableException
+from bedrock_bridge.exceptions import ServiceUnavailableException, UnsupportedOperationException
 from bedrock_bridge.provider_profiles import load_provider_profile
 from bedrock_bridge.transports.openai_chat_completions import OpenAIChatCompletionsTransport
 
@@ -96,6 +96,105 @@ def test_openai_transport_payload_and_response(monkeypatch: pytest.MonkeyPatch) 
     assert payload["response_format"]["json_schema"]["strict"] is True
     assert response.content[0].text == "done"
     assert response.usage == CanonicalUsage(10, 2, 12, reasoning_tokens=0, cached_input_tokens=1)
+
+
+def test_openai_transport_count_tokens_uses_responses_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["headers"] = dict(request.headers)
+        captured["json"] = json.loads(request.content)
+        return httpx.Response(200, json={"input_tokens": 37})
+
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    count = transport.count_tokens(_request(), load_provider_profile("openai"), "gpt-test")
+
+    payload = captured["json"]
+    headers = captured["headers"]
+    assert count == 37
+    assert captured["url"] == "https://api.openai.com/v1/responses/input_tokens"
+    assert isinstance(headers, dict)
+    assert headers["authorization"] == "Bearer sk-test"
+    assert isinstance(payload, dict)
+    assert payload["model"] == "gpt-test"
+    assert payload["instructions"] == "be brief"
+    assert payload["input"][0]["role"] == "user"
+    assert payload["input"][0]["content"][0] == {"type": "input_text", "text": "describe"}
+    assert payload["input"][0]["content"][1]["image_url"].startswith("data:image/png")
+    assert payload["tools"] == [
+        {
+            "type": "function",
+            "name": "lookup",
+            "description": "Lookup",
+            "parameters": {"type": "object"},
+        }
+    ]
+    assert payload["text"]["format"]["type"] == "json_schema"
+    assert payload["text"]["format"]["strict"] is True
+
+
+def test_openai_transport_count_tokens_uses_gemini_native_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["headers"] = dict(request.headers)
+        captured["json"] = json.loads(request.content)
+        return httpx.Response(200, json={"totalTokens": 44})
+
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    count = transport.count_tokens(_request(), load_provider_profile("gemini"), "gemini-test")
+
+    payload = captured["json"]
+    headers = captured["headers"]
+    assert count == 44
+    assert (
+        captured["url"]
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:countTokens"
+    )
+    assert isinstance(headers, dict)
+    assert headers["x-goog-api-key"] == "gemini-test"
+    assert isinstance(payload, dict)
+    assert payload["contents"][0]["role"] == "user"
+    assert payload["contents"][0]["parts"][0] == {"text": "describe"}
+    assert payload["contents"][0]["parts"][1]["inlineData"] == {
+        "mimeType": "image/png",
+        "data": "aGVsbG8=",
+    }
+    assert payload["systemInstruction"] == {
+        "role": "system",
+        "parts": [{"text": "be brief"}],
+    }
+    assert payload["tools"][0]["functionDeclarations"][0]["name"] == "lookup"
+    assert payload["toolConfig"]["functionCallingConfig"] == {
+        "mode": "ANY",
+        "allowedFunctionNames": ["lookup"],
+    }
+    assert payload["generationConfig"]["responseSchema"] == {"type": "object"}
+
+
+def test_openai_transport_count_tokens_requires_exact_strategy() -> None:
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(500))),
+    )
+
+    with pytest.raises(UnsupportedOperationException) as exc_info:
+        transport.count_tokens(_request(), load_provider_profile("openrouter"), "openai/gpt-4")
+
+    assert "Exact token counting is not configured" in str(exc_info.value)
 
 
 def test_openai_transport_preserves_provider_503(monkeypatch: pytest.MonkeyPatch) -> None:
