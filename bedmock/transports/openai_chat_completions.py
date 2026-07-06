@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterator, Sequence
+from hashlib import sha256
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
 from bedmock.canonical import (
+    CanonicalCachePointBlock,
     CanonicalContentBlock,
     CanonicalImageBlock,
     CanonicalJsonBlock,
@@ -602,9 +604,12 @@ class OpenAIChatCompletionsTransport:
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": target_model,
-            "messages": self._messages(request),
+            "messages": self._messages(request, provider),
         }
         self._add_generation_parameters(payload, request, provider, target_model)
+        prompt_cache_key = self._prompt_cache_key(request, provider, target_model)
+        if prompt_cache_key:
+            payload["prompt_cache_key"] = prompt_cache_key
         if stream:
             payload["stream"] = True
         if request.tools:
@@ -633,15 +638,23 @@ class OpenAIChatCompletionsTransport:
             payload.update(fixed)
         return {key: value for key, value in payload.items() if value is not None}
 
-    def _messages(self, request: CanonicalRequest) -> list[dict[str, Any]]:
+    def _messages(
+        self,
+        request: CanonicalRequest,
+        provider: ProviderProfile,
+    ) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
         if request.system:
-            messages.append({"role": "system", "content": self._content(request.system)})
+            messages.append({"role": "system", "content": self._content(request.system, provider)})
         for message in request.messages:
-            messages.extend(self._message(message))
+            messages.extend(self._message(message, provider))
         return messages
 
-    def _message(self, message: CanonicalMessage) -> list[dict[str, Any]]:
+    def _message(
+        self,
+        message: CanonicalMessage,
+        provider: ProviderProfile,
+    ) -> list[dict[str, Any]]:
         tool_results = [
             block for block in message.content if isinstance(block, CanonicalToolResultBlock)
         ]
@@ -661,7 +674,7 @@ class OpenAIChatCompletionsTransport:
         ]
         output: dict[str, Any] = {
             "role": message.role,
-            "content": self._content(text_blocks) or None,
+            "content": self._content(text_blocks, provider) or None,
         }
         if tool_uses:
             output["tool_calls"] = [
@@ -679,16 +692,25 @@ class OpenAIChatCompletionsTransport:
             ]
         return [output]
 
-    def _content(self, blocks: Sequence[CanonicalContentBlock]) -> str | list[dict[str, Any]]:
+    def _content(
+        self,
+        blocks: Sequence[CanonicalContentBlock],
+        provider: ProviderProfile,
+    ) -> str | list[dict[str, Any]]:
         if not blocks:
             return ""
         has_image = any(isinstance(block, CanonicalImageBlock) for block in blocks)
-        if not has_image:
+        has_openrouter_cache = provider.id == "openrouter" and any(
+            isinstance(block, CanonicalCachePointBlock) for block in blocks
+        )
+        if not has_image and not has_openrouter_cache:
             return self._tool_result_content(blocks)
         parts: list[dict[str, Any]] = []
+        last_text_part: dict[str, Any] | None = None
         for block in blocks:
             if isinstance(block, CanonicalTextBlock):
-                parts.append({"type": "text", "text": block.text})
+                last_text_part = {"type": "text", "text": block.text}
+                parts.append(last_text_part)
             elif isinstance(block, CanonicalImageBlock):
                 url = block.url
                 if block.data_base64:
@@ -697,10 +719,23 @@ class OpenAIChatCompletionsTransport:
                 if block.detail:
                     image_url["detail"] = block.detail
                 parts.append({"type": "image_url", "image_url": image_url})
+                last_text_part = None
             elif isinstance(block, CanonicalJsonBlock):
-                parts.append({"type": "text", "text": json.dumps(block.value, ensure_ascii=False)})
+                last_text_part = {
+                    "type": "text",
+                    "text": json.dumps(block.value, ensure_ascii=False),
+                }
+                parts.append(last_text_part)
             elif isinstance(block, CanonicalReasoningBlock):
-                parts.append({"type": "text", "text": block.text})
+                last_text_part = {"type": "text", "text": block.text}
+                parts.append(last_text_part)
+            elif isinstance(block, CanonicalCachePointBlock) and provider.id == "openrouter":
+                if last_text_part is None:
+                    continue
+                cache_control: dict[str, str] = {"type": "ephemeral"}
+                if block.ttl == "1h":
+                    cache_control["ttl"] = "1h"
+                last_text_part["cache_control"] = cache_control
         return parts
 
     def _tool_result_content(self, blocks: Sequence[CanonicalContentBlock]) -> str:
@@ -713,6 +748,48 @@ class OpenAIChatCompletionsTransport:
             elif isinstance(block, CanonicalReasoningBlock):
                 chunks.append(block.text)
         return "".join(chunks)
+
+    def _prompt_cache_key(
+        self,
+        request: CanonicalRequest,
+        provider: ProviderProfile,
+        target_model: str,
+    ) -> str | None:
+        if provider.id != "openai":
+            return None
+        chunks: list[str] = []
+        cache_prefix: list[str] | None = None
+        for block in request.system:
+            if self._append_cache_key_block(chunks, block):
+                cache_prefix = list(chunks)
+        for message in request.messages:
+            chunks.append(f"\nrole:{message.role}\n")
+            for block in message.content:
+                if self._append_cache_key_block(chunks, block):
+                    cache_prefix = list(chunks)
+        if cache_prefix is None or not any(chunk.strip() for chunk in cache_prefix):
+            return None
+        digest = sha256(
+            f"{request.source_model_id}\n{target_model}\n{''.join(cache_prefix)}".encode()
+        ).hexdigest()
+        return f"bedmock-cachepoint-{digest[:32]}"
+
+    def _append_cache_key_block(
+        self,
+        chunks: list[str],
+        block: CanonicalContentBlock,
+    ) -> bool:
+        if isinstance(block, CanonicalCachePointBlock):
+            return True
+        if isinstance(block, CanonicalTextBlock):
+            chunks.append(block.text)
+        elif isinstance(block, CanonicalJsonBlock):
+            chunks.append(json.dumps(block.value, sort_keys=True, ensure_ascii=False))
+        elif isinstance(block, CanonicalReasoningBlock):
+            chunks.append(block.text)
+        elif isinstance(block, CanonicalImageBlock):
+            chunks.append(block.url or block.data_base64 or "")
+        return False
 
     def _add_generation_parameters(
         self,
@@ -851,6 +928,7 @@ class OpenAIChatCompletionsTransport:
             total_tokens=usage.get("total_tokens"),
             reasoning_tokens=completion_details.get("reasoning_tokens"),
             cached_input_tokens=prompt_details.get("cached_tokens"),
+            cache_write_input_tokens=prompt_details.get("cache_write_tokens"),
         )
 
     def _provider_request_id(self, data: dict[str, Any], response: httpx.Response) -> str | None:

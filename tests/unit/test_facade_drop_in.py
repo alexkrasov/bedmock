@@ -10,6 +10,7 @@ from botocore.exceptions import ClientError
 
 import bedmock as boto3
 from bedmock import Session
+from bedmock.canonical import CanonicalCachePointBlock
 from bedmock.session import Session as ModuleSession
 from tests.conftest import anthropic_body
 
@@ -53,6 +54,25 @@ def test_converse_stream_matches_bedrock_taxonomy(
     assert "messageStart" in events[0]
     assert events[2]["contentBlockDelta"]["delta"]["text"] == "bedmock"
     assert events[-1]["metadata"]["usage"]["totalTokens"] == 5
+
+
+def test_converse_accepts_cache_point_blocks(
+    bedmock_env: None,
+    fake_transport: object,
+) -> None:
+    client = boto3.client("bedrock-runtime")
+    response = client.converse(
+        modelId="us.amazon.nova-2-lite-v1:0",
+        system=[
+            {"text": "Shared lesson policy."},
+            {"cachePoint": {"type": "default", "ttl": "5m"}},
+        ],
+        messages=[{"role": "user", "content": [{"text": "hello"}]}],
+    )
+
+    assert response["output"]["message"]["content"][0]["text"] == "bedmock ok"
+    request = fake_transport.requests[0]
+    assert request.system[-1] == CanonicalCachePointBlock(ttl="5m")
 
 
 def test_count_tokens_uses_transport_exact_strategy(

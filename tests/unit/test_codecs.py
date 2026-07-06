@@ -4,8 +4,14 @@ import json
 
 import pytest
 
-from bedmock.canonical import CanonicalResponse, CanonicalTextBlock, CanonicalUsage
+from bedmock.canonical import (
+    CanonicalCachePointBlock,
+    CanonicalResponse,
+    CanonicalTextBlock,
+    CanonicalUsage,
+)
 from bedmock.codecs import DEFAULT_CODEC_REGISTRY
+from bedmock.codecs.utils import converse_content_to_blocks
 from bedmock.exceptions import ValidationException
 
 
@@ -93,3 +99,17 @@ def test_anthropic_tool_and_image_validation() -> None:
     }
     with pytest.raises(ValidationException):
         codec.decode_request("anthropic.claude-3-haiku-20240307-v1:0", body)
+
+
+def test_converse_cache_point_decodes_and_validates() -> None:
+    blocks = converse_content_to_blocks(
+        [{"text": "Shared context"}, {"cachePoint": {"type": "default", "ttl": "1h"}}]
+    )
+
+    assert blocks == [
+        CanonicalTextBlock("Shared context"),
+        CanonicalCachePointBlock(type="default", ttl="1h"),
+    ]
+
+    with pytest.raises(ValidationException, match=r"cachePoint\.ttl"):
+        converse_content_to_blocks([{"cachePoint": {"type": "default", "ttl": "24h"}}])

@@ -7,6 +7,13 @@ from typing import Any, Literal
 
 
 @dataclass
+class CanonicalCachePointBlock:
+    type: Literal["default"] = "default"
+    ttl: Literal["5m", "1h"] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class CanonicalTextBlock:
     text: str
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -56,7 +63,8 @@ class CanonicalReasoningBlock:
 
 
 CanonicalContentBlock = (
-    CanonicalTextBlock
+    CanonicalCachePointBlock
+    | CanonicalTextBlock
     | CanonicalImageBlock
     | CanonicalToolUseBlock
     | CanonicalToolResultBlock

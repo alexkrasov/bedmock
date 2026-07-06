@@ -193,6 +193,18 @@ reference or contract coverage.
 | `converse_stream` | Implemented with ConverseStream taxonomy | Usage appears only if provider emits it | Missing usage remains absent |
 | `count_tokens` | Implemented for exact strategies | OpenAI and Gemini have built-in provider-native counters; OpenRouter and Groq do not expose one in Bedmock yet | `UnsupportedOperationException` when no exact strategy exists |
 
+## Prompt Cache Compatibility
+
+Bedrock Converse `cachePoint` blocks are accepted and never sent to the target model as prompt text.
+Provider cache behavior depends on the selected profile:
+
+| Provider profile | Bedmock `cachePoint` behavior | Provider cache behavior | Usage mapping |
+| --- | --- | --- | --- |
+| `openai` | Accepted; omitted from messages; used to derive a stable `prompt_cache_key` | Best effort only; OpenAI prompt caching remains prefix/model dependent and Bedmock does not map Bedrock TTL to OpenAI retention | `cached_tokens` -> `usage.cacheReadInputTokens`; cache writes are not reported by OpenAI chat completions |
+| `gemini` | Accepted as a no-op marker | No automatic Bedrock mapping; Bedmock does not create or reference Gemini `cachedContents/...` resources | Cache usage is mapped only if the OpenAI-compatible endpoint returns `prompt_tokens_details.cached_tokens` |
+| `openrouter` | Accepted; mapped to `cache_control` on the previous text content part | Explicit prompt caching where the routed model/provider supports it; `ttl: "1h"` is preserved, default/`5m` maps to ephemeral default | `cached_tokens` -> `usage.cacheReadInputTokens`; `cache_write_tokens` -> `usage.cacheWriteInputTokens` |
+| `groq` | Accepted as a no-op marker | Groq prompt caching is automatic for eligible repeated prefixes/models; Bedmock sends no cache-specific request fields | `cached_tokens` -> `usage.cacheReadInputTokens`; cache writes are not reported |
+
 ## Token Counting
 
 Bedmock implements Bedrock `CountTokens` as exact preflight counting only. It never estimates with

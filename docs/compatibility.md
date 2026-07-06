@@ -55,6 +55,21 @@ payload = json.loads(response["body"].read())
 ```
 
 Converse responses expose `output.message.content`, `stopReason`, `usage`, and `ResponseMetadata`.
+Prompt cache telemetry from OpenAI-compatible providers is mapped to Bedrock usage fields when the
+provider returns it: `cached_tokens` becomes `cacheReadInputTokens`, and `cache_write_tokens`
+becomes `cacheWriteInputTokens`.
+
+## Prompt Cache Compatibility
+
+Bedrock Converse `cachePoint` blocks are accepted as compatibility markers. Bedmock never includes
+the marker itself in prompt text sent to a provider.
+
+| Provider profile | Request handling | Cache behavior | Usage mapping |
+| --- | --- | --- | --- |
+| `openai` | Drops the marker from messages and derives `prompt_cache_key` from the marked prompt prefix | Best effort. OpenAI decides cache hits from prompt prefixes; Bedrock TTL is not mapped to OpenAI retention. | `cached_tokens` -> `cacheReadInputTokens` |
+| `gemini` | Drops the marker from messages | No-op in the built-in OpenAI-compatible Gemini profile. Bedmock does not create or use Gemini `cachedContents/...` resources. | Provider cache usage is mapped only if returned as OpenAI-style `cached_tokens`. |
+| `openrouter` | Converts the marker to `cache_control` on the previous text content part | Explicit cache control where the routed model/provider supports it. `ttl: "1h"` is preserved; default/`5m` uses OpenRouter's ephemeral default. | `cached_tokens` -> `cacheReadInputTokens`; `cache_write_tokens` -> `cacheWriteInputTokens` |
+| `groq` | Drops the marker from messages | No request field is needed; Groq prompt caching is automatic for eligible repeated prefixes/models. | `cached_tokens` -> `cacheReadInputTokens` |
 
 ## CountTokens Compatibility
 

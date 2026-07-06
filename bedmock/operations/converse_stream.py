@@ -80,6 +80,10 @@ class ConverseStreamOperationCodec(ConverseOperationCodec):
                     usage["outputTokens"] = event.usage.output_tokens
                 if event.usage.total_tokens is not None:
                     usage["totalTokens"] = event.usage.total_tokens
+                if event.usage.cached_input_tokens is not None:
+                    usage["cacheReadInputTokens"] = event.usage.cached_input_tokens
+                if event.usage.cache_write_input_tokens is not None:
+                    usage["cacheWriteInputTokens"] = event.usage.cache_write_input_tokens
             return {"metadata": {"usage": usage, "metrics": event.metadata.get("metrics", {})}}
         if event.event_type == "error":
             return {"internalServerException": event.metadata}

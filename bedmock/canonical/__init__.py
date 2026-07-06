@@ -1,6 +1,7 @@
 """Canonical request and response dataclasses."""
 
 from .content import (
+    CanonicalCachePointBlock,
     CanonicalContentBlock,
     CanonicalImageBlock,
     CanonicalJsonBlock,
@@ -17,6 +18,7 @@ from .tools import CanonicalResponseFormat, CanonicalTool, CanonicalToolChoice
 from .usage import CanonicalUsage
 
 __all__ = [
+    "CanonicalCachePointBlock",
     "CanonicalContentBlock",
     "CanonicalImageBlock",
     "CanonicalJsonBlock",

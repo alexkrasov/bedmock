@@ -12,6 +12,7 @@ class CanonicalUsage:
     total_tokens: int | None
     reasoning_tokens: int | None = None
     cached_input_tokens: int | None = None
+    cache_write_input_tokens: int | None = None
 
     @classmethod
     def empty(cls) -> CanonicalUsage:

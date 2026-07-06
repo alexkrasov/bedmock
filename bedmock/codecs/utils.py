@@ -7,6 +7,7 @@ import json
 from typing import Any
 
 from bedmock.canonical import (
+    CanonicalCachePointBlock,
     CanonicalContentBlock,
     CanonicalImageBlock,
     CanonicalJsonBlock,
@@ -44,6 +45,17 @@ def read_text(blocks: list[CanonicalContentBlock]) -> str:
         elif isinstance(block, CanonicalJsonBlock):
             parts.append(json.dumps(block.value, ensure_ascii=False))
     return "".join(parts)
+
+
+def cache_point_from_converse(value: Any) -> CanonicalCachePointBlock:
+    cache_point = require_type(value, dict, "cachePoint")
+    cache_type = cache_point.get("type")
+    if cache_type != "default":
+        raise ValidationException("cachePoint.type must be 'default'")
+    ttl = cache_point.get("ttl")
+    if ttl is not None and ttl not in {"5m", "1h"}:
+        raise ValidationException("cachePoint.ttl must be '5m' or '1h'")
+    return CanonicalCachePointBlock(type="default", ttl=ttl)
 
 
 def validate_base64_image(media_type: str, data_base64: str, *, max_bytes: int) -> None:
@@ -169,6 +181,8 @@ def converse_content_to_blocks(content: Any) -> list[CanonicalContentBlock]:
             raise ValidationException("Converse content blocks must be objects")
         if "text" in block:
             blocks.append(CanonicalTextBlock(str(block["text"])))
+        elif "cachePoint" in block:
+            blocks.append(cache_point_from_converse(block["cachePoint"]))
         elif "json" in block:
             blocks.append(CanonicalJsonBlock(block["json"]))
         elif "image" in block:
@@ -220,6 +234,11 @@ def converse_blocks_from_canonical(blocks: list[CanonicalContentBlock]) -> list[
     for block in blocks:
         if isinstance(block, CanonicalTextBlock):
             output.append({"text": block.text})
+        elif isinstance(block, CanonicalCachePointBlock):
+            cache_point: dict[str, str] = {"type": block.type}
+            if block.ttl is not None:
+                cache_point["ttl"] = block.ttl
+            output.append({"cachePoint": cache_point})
         elif isinstance(block, CanonicalJsonBlock):
             output.append({"json": block.value})
         elif isinstance(block, CanonicalReasoningBlock):

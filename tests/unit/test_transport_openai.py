@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from bedmock.canonical import (
+    CanonicalCachePointBlock,
     CanonicalImageBlock,
     CanonicalMessage,
     CanonicalRequest,
@@ -53,6 +54,49 @@ def _request() -> CanonicalRequest:
     )
 
 
+def _cache_point_request(ttl: str | None = None) -> CanonicalRequest:
+    return CanonicalRequest(
+        messages=[CanonicalMessage("user", [CanonicalTextBlock("What changed?")])],
+        system=[
+            CanonicalTextBlock("Shared policy document"),
+            CanonicalCachePointBlock(ttl=ttl),
+        ],
+        source_model_id="anthropic.claude-3-haiku-20240307-v1:0",
+        target_model="target-test",
+        max_output_tokens=None,
+        temperature=None,
+        top_p=None,
+        top_k=None,
+        stop_sequences=[],
+        tools=[],
+        tool_choice=None,
+        response_format=None,
+        stream=False,
+        metadata={"operation": "Converse"},
+        extensions={},
+    )
+
+
+def _ok_chat_response(**usage_overrides: object) -> dict[str, object]:
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 2,
+        "total_tokens": 12,
+        **usage_overrides,
+    }
+    return {
+        "id": "chatcmpl",
+        "model": "target-test",
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": "done"},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": usage,
+    }
+
+
 def test_openai_transport_payload_and_response(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     captured: dict[str, object] = {}
@@ -96,6 +140,101 @@ def test_openai_transport_payload_and_response(monkeypatch: pytest.MonkeyPatch) 
     assert payload["response_format"]["json_schema"]["strict"] is True
     assert response.content[0].text == "done"
     assert response.usage == CanonicalUsage(10, 2, 12, reasoning_tokens=0, cached_input_tokens=1)
+
+
+def test_openrouter_cache_point_maps_to_cache_control(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-test")
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["json"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json=_ok_chat_response(
+                prompt_tokens_details={"cached_tokens": 8, "cache_write_tokens": 2}
+            ),
+        )
+
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    response = transport.invoke(
+        _cache_point_request("1h"), load_provider_profile("openrouter"), "or-test"
+    )
+
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    system_content = payload["messages"][0]["content"]
+    assert system_content == [
+        {
+            "type": "text",
+            "text": "Shared policy document",
+            "cache_control": {"type": "ephemeral", "ttl": "1h"},
+        }
+    ]
+    assert "prompt_cache_key" not in payload
+    assert response.usage.cached_input_tokens == 8
+    assert response.usage.cache_write_input_tokens == 2
+
+
+def test_openai_cache_point_adds_prompt_cache_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    captured: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return httpx.Response(200, json=_ok_chat_response())
+
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    transport.invoke(_cache_point_request(), load_provider_profile("openai"), "gpt-test")
+    changed_request = _cache_point_request()
+    changed_request.messages = [
+        CanonicalMessage("user", [CanonicalTextBlock("Different question?")])
+    ]
+    transport.invoke(changed_request, load_provider_profile("openai"), "gpt-test")
+
+    payload = captured[0]
+    assert isinstance(payload, dict)
+    assert str(payload["prompt_cache_key"]).startswith("bedmock-cachepoint-")
+    assert captured[1]["prompt_cache_key"] == payload["prompt_cache_key"]
+    assert payload["messages"][0]["content"] == "Shared policy document"
+
+
+@pytest.mark.parametrize(
+    ("provider_id", "env_name", "env_value"),
+    [
+        ("gemini", "GEMINI_API_KEY", "gemini-test"),
+        ("groq", "GROQ_API_KEY", "groq-test"),
+    ],
+)
+def test_cache_point_is_noop_for_automatic_cache_providers(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_id: str,
+    env_name: str,
+    env_value: str,
+) -> None:
+    monkeypatch.setenv(env_name, env_value)
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["json"] = json.loads(request.content)
+        return httpx.Response(200, json=_ok_chat_response())
+
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    transport.invoke(_cache_point_request("5m"), load_provider_profile(provider_id), "target-test")
+
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    assert "prompt_cache_key" not in payload
+    assert "cache_control" not in json.dumps(payload)
+    assert payload["messages"][0]["content"] == "Shared policy document"
 
 
 def test_openai_transport_count_tokens_uses_responses_endpoint(

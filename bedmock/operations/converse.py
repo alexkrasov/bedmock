@@ -97,6 +97,10 @@ class ConverseOperationCodec:
             usage["outputTokens"] = response.usage.output_tokens
         if response.usage.total_tokens is not None:
             usage["totalTokens"] = response.usage.total_tokens
+        if response.usage.cached_input_tokens is not None:
+            usage["cacheReadInputTokens"] = response.usage.cached_input_tokens
+        if response.usage.cache_write_input_tokens is not None:
+            usage["cacheWriteInputTokens"] = response.usage.cache_write_input_tokens
         if usage:
             payload["usage"] = usage
         if response.usage.reasoning_tokens is not None:
