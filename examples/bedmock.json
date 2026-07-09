@@ -1,0 +1,111 @@
+{
+  "default": {
+    "provider": "gemini",
+    "model": "gemini-default-model"
+  },
+  "routes": [
+    {
+      "id": "nova-to-gemini",
+      "match": {
+        "model_id_glob": "us.amazon.nova-*"
+      },
+      "source_codec": "amazon_nova",
+      "target": {
+        "provider": "gemini",
+        "model": "gemini-default-model"
+      }
+    },
+    {
+      "id": "claude-haiku-to-openai",
+      "match": {
+        "model_id_glob": "anthropic.claude-3-haiku-*"
+      },
+      "source_codec": "anthropic_messages",
+      "target": {
+        "provider": "openai",
+        "model": "openai-tool-model"
+      }
+    },
+    {
+      "id": "claude-sonnet-to-openrouter",
+      "match": {
+        "model_id_regex": "^anthropic\\.claude-3-.*sonnet"
+      },
+      "source_codec": "anthropic_messages",
+      "target": {
+        "provider": "openrouter",
+        "model": "anthropic/claude-sonnet-route"
+      }
+    },
+    {
+      "id": "oss-coding-to-groq",
+      "match": {
+        "model_id": "bedmock.local.groq.oss-coder"
+      },
+      "source_codec": "anthropic_messages",
+      "target": {
+        "provider": "groq",
+        "model": "openai/gpt-oss-route"
+      }
+    }
+  ],
+  "providers": {
+    "groq": {
+      "parameter_policy": {
+        "omit_null_values": true,
+        "unsupported": [
+          "logprobs",
+          "logit_bias",
+          "top_logprobs",
+          "messages[].name"
+        ],
+        "fixed_values": {
+          "n": 1,
+          "reasoning_format": "hidden"
+        },
+        "transforms": {
+          "zero_temperature_to_epsilon": true
+        }
+      },
+      "model_overrides": [
+        {
+          "model_glob": "openai/gpt-oss-*",
+          "capabilities": {
+            "tools": true,
+            "structured_output": true,
+            "reasoning": true
+          }
+        }
+      ]
+    },
+    "openrouter": {
+      "optional_headers": {
+        "HTTP-Referer": "${OPENROUTER_HTTP_REFERER}",
+        "X-Title": "${OPENROUTER_APP_TITLE}"
+      },
+      "model_overrides": [
+        {
+          "model_glob": "anthropic/*",
+          "capabilities": {
+            "tools": true,
+            "strict_tool_schema": true,
+            "structured_output": true,
+            "streaming": true
+          }
+        }
+      ]
+    },
+    "openai": {
+      "model_overrides": [
+        {
+          "model_glob": "openai-tool-*",
+          "capabilities": {
+            "tools": true,
+            "strict_tool_schema": true,
+            "structured_output": true
+          }
+        }
+      ]
+    }
+  }
+}

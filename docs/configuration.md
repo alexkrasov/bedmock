@@ -37,6 +37,45 @@ should stay in environment variables, not in config files.
 
 `BEDMOCK_CONFIG` can point at an explicit JSON config file.
 
+Use a config file when the application should route different Bedrock source model IDs to different
+providers or when a built-in provider profile needs local capability or parameter-policy overrides:
+
+```json
+{
+  "default": {
+    "provider": "gemini",
+    "model": "gemini-default-model"
+  },
+  "routes": [
+    {
+      "id": "claude-haiku-to-openai",
+      "match": {"model_id_glob": "anthropic.claude-3-haiku-*"},
+      "source_codec": "anthropic_messages",
+      "target": {"provider": "openai", "model": "openai-tool-model"}
+    }
+  ],
+  "providers": {
+    "groq": {
+      "parameter_policy": {
+        "omit_null_values": true,
+        "unsupported": ["logprobs", "logit_bias", "top_logprobs", "messages[].name"],
+        "fixed_values": {"n": 1, "reasoning_format": "hidden"},
+        "transforms": {"zero_temperature_to_epsilon": true}
+      }
+    }
+  }
+}
+```
+
+The `routes` array is evaluated by exact `model_id`, then `model_id_glob`, then `model_id_regex`.
+The `providers` object overrides built-in or custom provider profiles after they are loaded; nested
+objects such as `parameter_policy` are replaced as complete sections, so include the full local
+policy you want Bedmock to use.
+
+See `examples/bedmock.json` for a larger copyable example with multiple routes and provider
+overrides. The example contains no secrets; put API keys in environment variables such as
+`OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, and `GROQ_API_KEY`.
+
 ## Env Files For CLI Commands
 
 Bedmock does not load `.env` automatically. To use a local dotenv-style file for one CLI

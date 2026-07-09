@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -116,3 +117,27 @@ def test_bedmock_config_filename_loads(monkeypatch: pytest.MonkeyPatch, tmp_path
 
     assert config.provider == "gemini"
     assert config.model == "gemini-model"
+
+
+def test_example_bedmock_json_loads_and_routes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    repo_root = Path(__file__).parents[2]
+    example = repo_root / "examples" / "bedmock.json"
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "bedmock.json").write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+
+    config = load_config()
+    route = resolve_route(config, "anthropic.claude-3-haiku-20240307-v1:0")
+    groq_route = resolve_route(config, "bedmock.local.groq.oss-coder")
+
+    assert config.provider == "gemini"
+    assert (
+        config.provider_overrides["groq"]["parameter_policy"]["fixed_values"]["reasoning_format"]
+        == "hidden"
+    )
+    assert route.route_id == "claude-haiku-to-openai"
+    assert route.provider_id == "openai"
+    assert route.source_codec == "anthropic_messages"
+    assert groq_route.provider_id == "groq"

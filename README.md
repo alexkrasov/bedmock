@@ -170,6 +170,10 @@ Create `bedmock.json` in the working directory or point `BEDMOCK_CONFIG` at a fi
 Route priority is exact `model_id`, glob, regex, default route, then environment fallback. Multiple
 matches at the same priority are configuration errors.
 
+For a fuller copyable config with multiple provider routes and `providers` overrides, see
+`examples/bedmock.json`. Config files should contain routing and non-secret provider policy only;
+keep API keys in environment variables or an explicitly loaded `.env` file.
+
 ## Supported Codecs
 
 - Anthropic Messages on Bedrock
@@ -268,6 +272,7 @@ source /path/to/bedmock/setup.sh
 ## Documentation
 
 - `docs/configuration.md`
+- `examples/bedmock.json`
 - `docs/compatibility.md`
 - `docs/architecture.md`
 - `docs/adding-a-provider.md`
