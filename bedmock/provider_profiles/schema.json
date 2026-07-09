@@ -13,6 +13,13 @@
     "capabilities": {"type": "object"},
     "parameter_policy": {"type": "object"},
     "output_token_parameter": {"type": "object"},
-    "model_overrides": {"type": "array"}
+    "model_overrides": {"type": "array"},
+    "bedrock_controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"enum": ["fail", "passthrough"]}
+      }
+    }
   }
 }

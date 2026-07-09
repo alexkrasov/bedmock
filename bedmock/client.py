@@ -18,7 +18,7 @@ from .operations import (
 from .operations.base import OperationContext
 from .provider_profiles import ProviderProfile, load_provider_profile
 from .routing import resolve_route
-from .transports import ProviderTransport, build_transport
+from .transports import ProviderTransport, apply_bedrock_control_policy, build_transport
 
 
 @dataclass
@@ -97,7 +97,9 @@ class BedrockRuntimeClient:
         context = self._context("InvokeModel", model_id)
         operation = InvokeModelOperationCodec()
         request = operation.decode_operation_request(kwargs, context)
-        response = self._transport(context.provider).invoke(
+        transport = self._transport(context.provider)
+        apply_bedrock_control_policy(request, context.provider, transport)
+        response = transport.invoke(
             request,
             context.provider,
             context.route.target_model,
@@ -109,7 +111,9 @@ class BedrockRuntimeClient:
         context = self._context("InvokeModelWithResponseStream", model_id)
         operation = InvokeModelWithResponseStreamOperationCodec()
         request = operation.decode_operation_request(kwargs, context)
-        events = self._transport(context.provider).invoke_stream(
+        transport = self._transport(context.provider)
+        apply_bedrock_control_policy(request, context.provider, transport)
+        events = transport.invoke_stream(
             request,
             context.provider,
             context.route.target_model,
@@ -121,7 +125,9 @@ class BedrockRuntimeClient:
         context = self._context("Converse", model_id)
         operation = ConverseOperationCodec()
         request = operation.decode_operation_request(kwargs, context)
-        response = self._transport(context.provider).invoke(
+        transport = self._transport(context.provider)
+        apply_bedrock_control_policy(request, context.provider, transport)
+        response = transport.invoke(
             request,
             context.provider,
             context.route.target_model,
@@ -133,7 +139,9 @@ class BedrockRuntimeClient:
         context = self._context("ConverseStream", model_id)
         operation = ConverseStreamOperationCodec()
         request = operation.decode_operation_request(kwargs, context)
-        events = self._transport(context.provider).invoke_stream(
+        transport = self._transport(context.provider)
+        apply_bedrock_control_policy(request, context.provider, transport)
+        events = transport.invoke_stream(
             request,
             context.provider,
             context.route.target_model,
@@ -145,7 +153,9 @@ class BedrockRuntimeClient:
         context = self._context("CountTokens", model_id)
         operation = CountTokensOperationCodec()
         request = operation.decode_operation_request(kwargs, context)
-        count = self._transport(context.provider).count_tokens(
+        transport = self._transport(context.provider)
+        apply_bedrock_control_policy(request, context.provider, transport)
+        count = transport.count_tokens(
             request,
             context.provider,
             context.route.target_model,

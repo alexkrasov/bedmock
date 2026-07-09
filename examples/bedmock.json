@@ -79,6 +79,9 @@
       ]
     },
     "openrouter": {
+      "bedrock_controls": {
+        "mode": "passthrough"
+      },
       "optional_headers": {
         "HTTP-Referer": "${OPENROUTER_HTTP_REFERER}",
         "X-Title": "${OPENROUTER_APP_TITLE}"
@@ -96,6 +99,9 @@
       ]
     },
     "openai": {
+      "bedrock_controls": {
+        "mode": "fail"
+      },
       "model_overrides": [
         {
           "model_glob": "openai-tool-*",

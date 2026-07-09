@@ -174,6 +174,23 @@ For a fuller copyable config with multiple provider routes and `providers` overr
 `examples/bedmock.json`. Config files should contain routing and non-secret provider policy only;
 keep API keys in environment variables or an explicitly loaded `.env` file.
 
+Provider overrides can also choose how Bedmock handles recognized Bedrock controls that the
+selected transport cannot map, such as `guardrailIdentifier`, `trace`, or `serviceTier`:
+
+```json
+{
+  "providers": {
+    "openai": {"bedrock_controls": {"mode": "fail"}},
+    "openrouter": {"bedrock_controls": {"mode": "passthrough"}}
+  }
+}
+```
+
+`fail` is the default and rejects unmapped controls before network I/O. `passthrough` preserves the
+controls for the transport, but it is not a claim that the upstream provider received them. If a
+transport does not forward an accepted control, Bedmock emits `BedmockCompatibilityWarning` with
+the provider, operation, and dropped field names.
+
 ## Supported Codecs
 
 - Anthropic Messages on Bedrock

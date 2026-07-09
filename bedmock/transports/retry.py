@@ -32,6 +32,17 @@ def retry_after_seconds(response: httpx.Response | None) -> float | None:
         return None
 
 
+def retry_delay_seconds(response: httpx.Response | None, attempt: int) -> float:
+    delay = retry_after_seconds(response)
+    if delay is not None:
+        return delay
+    return float(min(2.0, 0.1 * (2**attempt)) + random.uniform(0, 0.05))
+
+
+def sleep_before_retry(response: httpx.Response | None, attempt: int) -> None:
+    time.sleep(retry_delay_seconds(response, attempt))
+
+
 def with_retries(fn: Callable[[], T], *, max_retries: int) -> T:
     attempt = 0
     last_response: httpx.Response | None = None
@@ -41,18 +52,13 @@ def with_retries(fn: Callable[[], T], *, max_retries: int) -> T:
             if isinstance(result, httpx.Response):
                 last_response = result
                 if result.status_code in RETRYABLE_STATUS and attempt < max_retries:
-                    delay = retry_after_seconds(result)
-                    if delay is None:
-                        delay = min(2.0, 0.1 * (2**attempt)) + random.uniform(0, 0.05)
-                    time.sleep(delay)
+                    result.close()
+                    sleep_before_retry(result, attempt)
                     attempt += 1
                     continue
             return result
         except RETRYABLE_EXCEPTIONS:
             if attempt >= max_retries:
                 raise
-            delay = retry_after_seconds(last_response)
-            if delay is None:
-                delay = min(2.0, 0.1 * (2**attempt)) + random.uniform(0, 0.05)
-            time.sleep(delay)
+            sleep_before_retry(last_response, attempt)
             attempt += 1

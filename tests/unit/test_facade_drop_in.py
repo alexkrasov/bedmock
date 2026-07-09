@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import sys
+import warnings
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from botocore.exceptions import ClientError
@@ -11,6 +12,7 @@ from botocore.exceptions import ClientError
 import bedmock as boto3
 from bedmock import Session
 from bedmock.canonical import CanonicalCachePointBlock
+from bedmock.exceptions import BedmockCompatibilityWarning, ValidationException
 from bedmock.session import Session as ModuleSession
 from tests.conftest import anthropic_body
 
@@ -28,6 +30,95 @@ def test_invoke_model_drop_in_streaming_body(bedmock_env: None, fake_transport: 
     assert payload["content"][0]["text"] == "bedmock ok"
     assert response["contentType"] == "application/json"
     assert response["ResponseMetadata"]["RequestId"] == "req-test"
+
+
+def test_invoke_model_rejects_unknown_parameters_before_transport(
+    bedmock_env: None,
+    fake_transport: object,
+) -> None:
+    client = boto3.client("bedrock-runtime")
+
+    with pytest.raises(ValidationException, match=r"unknown parameter.*typo"):
+        client.invoke_model(
+            modelId="anthropic.claude-3-haiku-20240307-v1:0",
+            body=anthropic_body(),
+            typo=True,
+        )
+
+    assert cast(Any, fake_transport).requests == []
+
+
+def test_invoke_model_bedrock_controls_fail_before_transport_by_default(
+    bedmock_env: None,
+    fake_transport: object,
+) -> None:
+    client = boto3.client("bedrock-runtime")
+
+    with pytest.raises(ValidationException, match="guardrailIdentifier, guardrailVersion"):
+        client.invoke_model(
+            modelId="anthropic.claude-3-haiku-20240307-v1:0",
+            body=anthropic_body(),
+            guardrailIdentifier="guardrail-id",
+            guardrailVersion="1",
+        )
+
+    assert cast(Any, fake_transport).requests == []
+
+
+def test_invoke_model_passthrough_warns_and_preserves_controls(
+    bedmock_env: None,
+    fake_transport: object,
+    tmp_path: Any,
+) -> None:
+    (tmp_path / "bedmock.json").write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "openai": {"bedrock_controls": {"mode": "passthrough"}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = boto3.client("bedrock-runtime")
+
+    with pytest.warns(BedmockCompatibilityWarning) as warning_info:
+        client.invoke_model(
+            modelId="anthropic.claude-3-haiku-20240307-v1:0",
+            body=anthropic_body(),
+            guardrailIdentifier="guardrail-id",
+            guardrailVersion="1",
+            trace="ENABLED",
+        )
+
+    assert len(warning_info) == 1
+    assert "guardrailIdentifier, guardrailVersion, trace" in str(warning_info[0].message)
+    request = cast(Any, fake_transport).requests[0]
+    assert request.extensions["bedrock_controls"] == {
+        "guardrailIdentifier": "guardrail-id",
+        "guardrailVersion": "1",
+        "trace": "ENABLED",
+    }
+
+
+def test_invoke_model_mapped_controls_do_not_warn(
+    bedmock_env: None,
+    fake_transport: object,
+) -> None:
+    transport = cast(Any, fake_transport)
+    transport.supported_bedrock_controls = frozenset({"trace"})
+    client = boto3.client("bedrock-runtime")
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        client.invoke_model(
+            modelId="anthropic.claude-3-haiku-20240307-v1:0",
+            body=anthropic_body(),
+            trace="ENABLED",
+        )
+
+    assert caught == []
+    assert transport.requests[0].extensions["bedrock_controls"] == {"trace": "ENABLED"}
 
 
 def test_session_namespaces_create_bedrock_client(
@@ -52,7 +143,8 @@ def test_converse_stream_matches_bedrock_taxonomy(
     )
     events = list(response["stream"])
     assert "messageStart" in events[0]
-    assert events[2]["contentBlockDelta"]["delta"]["text"] == "bedmock"
+    assert events[1]["contentBlockDelta"]["delta"]["text"] == "bedmock"
+    assert all("contentBlockStart" not in event for event in events)
     assert events[-1]["metadata"]["usage"]["totalTokens"] == 5
 
 

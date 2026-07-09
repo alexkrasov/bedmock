@@ -6,6 +6,7 @@ import json
 import re
 from collections.abc import Iterator, Sequence
 from hashlib import sha256
+from itertools import chain
 from typing import Any
 from urllib.parse import quote
 
@@ -32,8 +33,13 @@ from bedmock.canonical import (
 from bedmock.capabilities import resolve_capability
 from bedmock.exceptions import (
     AccessDeniedException,
+    BedmockError,
+    InternalServerException,
+    ModelStreamErrorException,
+    ServiceUnavailableException,
     UnsupportedOperationException,
     ValidationException,
+    error_from_http_status,
 )
 from bedmock.provider_profiles import ProviderProfile
 
@@ -42,12 +48,18 @@ from .http_errors import (
     provider_request_id_from_response,
     raise_for_provider_status,
 )
-from .retry import with_retries
+from .retry import (
+    RETRYABLE_EXCEPTIONS,
+    RETRYABLE_STATUS,
+    sleep_before_retry,
+    with_retries,
+)
 from .sse import iter_sse_json
 
 
 class OpenAIChatCompletionsTransport:
     transport_id = "openai_chat_completions"
+    supported_bedrock_controls: frozenset[str] = frozenset()
 
     def __init__(
         self,
@@ -98,9 +110,24 @@ class OpenAIChatCompletionsTransport:
             mapped = map_network_error(exc, operation_name)
             raise mapped from exc
         if not isinstance(data, dict):
-            raise ValidationException("Provider response must be a JSON object")
+            raise InternalServerException(
+                "Provider response must be a JSON object",
+                operation_name=operation_name,
+                request_id=provider_request_id_from_response(response),
+            )
         request_id = self._provider_request_id(data, response)
-        return self._canonical_response(data, request_id=request_id, provider_model=target_model)
+        try:
+            return self._canonical_response(
+                data,
+                request_id=request_id,
+                provider_model=target_model,
+                operation_name=operation_name,
+            )
+        except BedmockError:
+            raise
+        except Exception as exc:
+            mapped = map_network_error(exc, operation_name)
+            raise mapped from exc
 
     def invoke_stream(
         self,
@@ -113,104 +140,234 @@ class OpenAIChatCompletionsTransport:
         operation_name = str(request.metadata.get("operation", "InvokeModelWithResponseStream"))
 
         def stream_events() -> Iterator[CanonicalStreamEvent]:
+            response: httpx.Response | None = None
+            chunks: Iterator[dict[str, Any]] | None = None
+            attempt = 0
+            while True:
+                try:
+                    provider_request = self._client.build_request(
+                        "POST",
+                        provider.endpoint_url,
+                        headers=headers,
+                        json=payload,
+                    )
+                    response = self._client.send(provider_request, stream=True)
+                    if response.status_code in RETRYABLE_STATUS and attempt < self.max_retries:
+                        response.close()
+                        sleep_before_retry(response, attempt)
+                        response = None
+                        attempt += 1
+                        continue
+                    raise_for_provider_status(response, operation_name)
+                    chunk_iterator = iter_sse_json(response.iter_lines())
+                    try:
+                        first_chunk = next(chunk_iterator)
+                    except StopIteration as exc:
+                        raise ModelStreamErrorException(
+                            "Provider stream ended before the first event",
+                            operation_name=operation_name,
+                        ) from exc
+                    except ValidationException as exc:
+                        raise ModelStreamErrorException(
+                            "Provider stream returned malformed SSE JSON",
+                            operation_name=operation_name,
+                        ) from exc
+                    stream_error = self._provider_stream_error(first_chunk, operation_name)
+                    if stream_error is not None:
+                        if (
+                            self._is_retryable_stream_error(stream_error)
+                            and attempt < self.max_retries
+                        ):
+                            response.close()
+                            sleep_before_retry(response, attempt)
+                            response = None
+                            attempt += 1
+                            continue
+                        raise stream_error
+                    chunks = chain((first_chunk,), chunk_iterator)
+                    break
+                except RETRYABLE_EXCEPTIONS as exc:
+                    if response is not None:
+                        response.close()
+                        response = None
+                    if attempt < self.max_retries:
+                        sleep_before_retry(None, attempt)
+                        attempt += 1
+                        continue
+                    mapped = map_network_error(exc, operation_name)
+                    raise mapped from exc
+                except Exception:
+                    if response is not None:
+                        response.close()
+                    raise
+
+            assert response is not None
+            assert chunks is not None
             sequence = 0
-            visible = False
-            text_started = False
+            next_block_index = 0
+            text_index: int | None = None
+            tool_indexes: dict[int, int] = {}
+            tool_metadata: dict[int, dict[str, str | None]] = {}
             open_blocks: set[int] = set()
             finish_reason: str | None = None
             usage: CanonicalUsage | None = None
             try:
-                with self._client.stream(
-                    "POST",
-                    provider.endpoint_url,
-                    headers=headers,
-                    json=payload,
-                ) as response:
-                    raise_for_provider_status(response, operation_name)
-                    yield CanonicalStreamEvent("message_start", sequence)
-                    visible = True
-                    sequence += 1
-                    for chunk in iter_sse_json(response.iter_lines()):
-                        chunk_usage = self._usage_from_provider(chunk.get("usage"))
-                        if chunk_usage.total_tokens is not None:
-                            usage = chunk_usage
-                        choices = chunk.get("choices") or []
-                        if not choices:
-                            continue
-                        choice = choices[0]
-                        delta = choice.get("delta") or {}
-                        if delta.get("content") is not None:
-                            if not text_started:
-                                yield CanonicalStreamEvent(
-                                    "content_block_start",
-                                    sequence,
-                                    content_block_index=0,
-                                    content_block_type="text",
-                                )
-                                sequence += 1
-                                text_started = True
-                                open_blocks.add(0)
+                yield CanonicalStreamEvent("message_start", sequence)
+                sequence += 1
+                for chunk in chunks:
+                    stream_error = self._provider_stream_error(chunk, operation_name)
+                    if stream_error is not None:
+                        raise stream_error
+                    chunk_usage = self._usage_from_provider(chunk.get("usage"))
+                    if chunk_usage.total_tokens is not None:
+                        usage = chunk_usage
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    choice = choices[0]
+                    delta = choice.get("delta") or {}
+                    if delta.get("content") is not None:
+                        if text_index is None:
+                            text_index = next_block_index
+                            next_block_index += 1
+                            yield CanonicalStreamEvent(
+                                "content_block_start",
+                                sequence,
+                                content_block_index=text_index,
+                                content_block_type="text",
+                            )
+                            sequence += 1
+                            open_blocks.add(text_index)
+                        yield CanonicalStreamEvent(
+                            "content_block_delta",
+                            sequence,
+                            content_block_index=text_index,
+                            content_block_type="text",
+                            text_delta=str(delta.get("content") or ""),
+                        )
+                        sequence += 1
+                    for tool_call in delta.get("tool_calls") or []:
+                        provider_index = int(tool_call.get("index", 0))
+                        function = tool_call.get("function") or {}
+                        if provider_index not in tool_indexes:
+                            tool_indexes[provider_index] = next_block_index
+                            next_block_index += 1
+                            tool_metadata[provider_index] = {
+                                "id": tool_call.get("id"),
+                                "name": function.get("name"),
+                            }
+                        metadata = tool_metadata[provider_index]
+                        if tool_call.get("id"):
+                            metadata["id"] = str(tool_call["id"])
+                        if function.get("name"):
+                            metadata["name"] = str(function["name"])
+                        index = tool_indexes[provider_index]
+                        if index not in open_blocks:
+                            yield CanonicalStreamEvent(
+                                "content_block_start",
+                                sequence,
+                                content_block_index=index,
+                                content_block_type="tool_use",
+                                tool_call_id=metadata["id"],
+                                tool_name=metadata["name"],
+                            )
+                            sequence += 1
+                            open_blocks.add(index)
+                        arguments = function.get("arguments")
+                        if arguments:
                             yield CanonicalStreamEvent(
                                 "content_block_delta",
                                 sequence,
-                                content_block_index=0,
-                                content_block_type="text",
-                                text_delta=str(delta.get("content") or ""),
+                                content_block_index=index,
+                                content_block_type="tool_use",
+                                tool_call_id=metadata["id"],
+                                tool_name=metadata["name"],
+                                tool_arguments_delta=str(arguments),
                             )
                             sequence += 1
-                        for tool_call in delta.get("tool_calls") or []:
-                            index = int(tool_call.get("index", 0))
-                            function = tool_call.get("function") or {}
-                            if index not in open_blocks:
-                                yield CanonicalStreamEvent(
-                                    "content_block_start",
-                                    sequence,
-                                    content_block_index=index,
-                                    content_block_type="tool_use",
-                                    tool_call_id=tool_call.get("id"),
-                                    tool_name=function.get("name"),
-                                )
-                                sequence += 1
-                                open_blocks.add(index)
-                            arguments = function.get("arguments")
-                            if arguments:
-                                yield CanonicalStreamEvent(
-                                    "content_block_delta",
-                                    sequence,
-                                    content_block_index=index,
-                                    content_block_type="tool_use",
-                                    tool_call_id=tool_call.get("id"),
-                                    tool_name=function.get("name"),
-                                    tool_arguments_delta=str(arguments),
-                                )
-                                sequence += 1
-                        if choice.get("finish_reason"):
-                            finish_reason = self._finish_reason(choice.get("finish_reason"))
-                    for index in sorted(open_blocks):
-                        yield CanonicalStreamEvent("content_block_stop", sequence, index)
-                        sequence += 1
-                    yield CanonicalStreamEvent(
-                        "message_delta",
-                        sequence,
-                        finish_reason=finish_reason or "end_turn",
-                        usage=usage,
+                    if choice.get("finish_reason") is not None:
+                        finish_reason = self._finish_reason(choice.get("finish_reason"))
+                if finish_reason is None:
+                    raise ModelStreamErrorException(
+                        "Provider stream ended without a finish reason",
+                        operation_name=operation_name,
                     )
+                for index in sorted(open_blocks):
+                    yield CanonicalStreamEvent("content_block_stop", sequence, index)
                     sequence += 1
-                    yield CanonicalStreamEvent(
-                        "message_stop",
-                        sequence,
-                        finish_reason=finish_reason or "end_turn",
-                    )
-                    sequence += 1
-                    if usage:
-                        yield CanonicalStreamEvent("metadata", sequence, usage=usage)
+                yield CanonicalStreamEvent(
+                    "message_delta",
+                    sequence,
+                    finish_reason=finish_reason,
+                    usage=usage,
+                )
+                sequence += 1
+                yield CanonicalStreamEvent(
+                    "message_stop",
+                    sequence,
+                    finish_reason=finish_reason,
+                )
+                sequence += 1
+                if usage:
+                    yield CanonicalStreamEvent("metadata", sequence, usage=usage)
+            except ValidationException as exc:
+                raise ModelStreamErrorException(
+                    "Provider stream returned malformed SSE JSON",
+                    operation_name=operation_name,
+                ) from exc
+            except BedmockError:
+                raise
             except Exception as exc:
-                if visible:
-                    raise
                 mapped = map_network_error(exc, operation_name)
                 raise mapped from exc
+            finally:
+                response.close()
 
         return stream_events()
+
+    def _provider_stream_error(
+        self,
+        chunk: dict[str, Any],
+        operation_name: str,
+    ) -> BedmockError | None:
+        if "error" not in chunk:
+            return None
+        raw_error = chunk.get("error")
+        status_code: int | None = None
+        request_id = chunk.get("request_id")
+        if isinstance(raw_error, dict):
+            message = raw_error.get("message") or raw_error.get("detail") or raw_error.get("code")
+            raw_status = raw_error.get("status_code", raw_error.get("status"))
+            if isinstance(raw_status, int) and not isinstance(raw_status, bool):
+                status_code = raw_status
+            elif isinstance(raw_status, str) and raw_status.isdigit():
+                status_code = int(raw_status)
+        else:
+            message = raw_error
+        safe_message = str(message or "Provider reported a streaming error")
+        if status_code == 424:
+            return ModelStreamErrorException(
+                safe_message,
+                operation_name=operation_name,
+                request_id=str(request_id) if request_id else None,
+            )
+        if status_code is not None:
+            exc_type = error_from_http_status(status_code)
+            return exc_type(
+                safe_message,
+                operation_name=operation_name,
+                request_id=str(request_id) if request_id else None,
+                status_code=status_code,
+            )
+        return ServiceUnavailableException(
+            safe_message,
+            operation_name=operation_name,
+            request_id=str(request_id) if request_id else None,
+        )
+
+    def _is_retryable_stream_error(self, error: BedmockError) -> bool:
+        status_code = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        return isinstance(status_code, int) and status_code in RETRYABLE_STATUS
 
     def count_tokens(
         self,
@@ -283,7 +440,10 @@ class OpenAIChatCompletionsTransport:
             mapped = map_network_error(exc, operation_name)
             raise mapped from exc
         if not isinstance(data, dict):
-            raise ValidationException("Provider token count response must be a JSON object")
+            raise InternalServerException(
+                "Provider token count response must be a JSON object",
+                operation_name=operation_name,
+            )
         return data
 
     def _extract_token_count(self, data: dict[str, Any], *field_names: str) -> int:
@@ -661,7 +821,7 @@ class OpenAIChatCompletionsTransport:
             block for block in message.content if isinstance(block, CanonicalToolResultBlock)
         ]
         if tool_results:
-            return [
+            output_messages = [
                 {
                     "role": "tool",
                     "tool_call_id": result.tool_use_id,
@@ -669,6 +829,15 @@ class OpenAIChatCompletionsTransport:
                 }
                 for result in tool_results
             ]
+            residual: list[CanonicalContentBlock] = [
+                block
+                for block in message.content
+                if not isinstance(block, CanonicalToolResultBlock)
+            ]
+            if residual:
+                residual_message = CanonicalMessage(message.role, residual)
+                output_messages.extend(self._message(residual_message, provider))
+            return output_messages
 
         tool_uses = [block for block in message.content if isinstance(block, CanonicalToolUseBlock)]
         text_blocks = [
@@ -899,16 +1068,29 @@ class OpenAIChatCompletionsTransport:
         *,
         request_id: str | None,
         provider_model: str,
+        operation_name: str,
     ) -> CanonicalResponse:
         choices = data.get("choices") or []
         if not isinstance(choices, list) or not choices:
-            raise ValidationException("Provider response missing choices")
+            raise InternalServerException(
+                "Provider response is missing choices",
+                operation_name=operation_name,
+                request_id=request_id,
+            )
         choice = choices[0]
         if not isinstance(choice, dict):
-            raise ValidationException("Provider choice must be an object")
+            raise InternalServerException(
+                "Provider choice must be an object",
+                operation_name=operation_name,
+                request_id=request_id,
+            )
         message = choice.get("message") or {}
         if not isinstance(message, dict):
-            raise ValidationException("Provider message must be an object")
+            raise InternalServerException(
+                "Provider message must be an object",
+                operation_name=operation_name,
+                request_id=request_id,
+            )
         content: list[CanonicalContentBlock] = []
         text = message.get("content")
         if text:

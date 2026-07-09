@@ -14,9 +14,13 @@ from bedmock.canonical import (
     CanonicalTextBlock,
     CanonicalTool,
     CanonicalToolChoice,
+    CanonicalToolResultBlock,
 )
 from bedmock.canonical.usage import CanonicalUsage
 from bedmock.exceptions import (
+    AccessDeniedException,
+    InternalServerException,
+    ModelStreamErrorException,
     ServiceUnavailableException,
     UnsupportedOperationException,
     ValidationException,
@@ -133,6 +137,14 @@ def _ok_chat_response(**usage_overrides: object) -> dict[str, object]:
     }
 
 
+def _stream_response(content: str, status_code: int = 200) -> httpx.Response:
+    return httpx.Response(
+        status_code,
+        headers={"content-type": "text/event-stream", "retry-after": "0"},
+        content=content,
+    )
+
+
 def test_openai_transport_payload_and_response(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     captured: dict[str, object] = {}
@@ -177,6 +189,50 @@ def test_openai_transport_payload_and_response(monkeypatch: pytest.MonkeyPatch) 
     assert payload["response_format"]["json_schema"]["strict"] is True
     assert response.content[0].text == "done"
     assert response.usage == CanonicalUsage(10, 2, 12, reasoning_tokens=0, cached_input_tokens=1)
+
+
+def test_tool_results_preserve_residual_user_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["json"] = json.loads(request.content)
+        return httpx.Response(200, json=_ok_chat_response())
+
+    request = _request()
+    request.messages = [
+        CanonicalMessage(
+            "user",
+            [
+                CanonicalToolResultBlock("call_1", [CanonicalTextBlock("42")]),
+                CanonicalToolResultBlock("call_2", [CanonicalTextBlock("ok")]),
+                CanonicalTextBlock("Now compare both results"),
+                CanonicalImageBlock("image/png", data_base64="aGVsbG8="),
+            ],
+        )
+    ]
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    transport.invoke(request, load_provider_profile("openai"), "gpt-test")
+
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    assert payload["messages"][1:] == [
+        {"role": "tool", "tool_call_id": "call_1", "content": "42"},
+        {"role": "tool", "tool_call_id": "call_2", "content": "ok"},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Now compare both results"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,aGVsbG8="},
+                },
+            ],
+        },
+    ]
 
 
 def test_openai_transport_payload_includes_strict_tool_schema(
@@ -488,6 +544,57 @@ def test_openai_transport_preserves_provider_503(monkeypatch: pytest.MonkeyPatch
     assert metadata["HTTPStatusCode"] == 503
 
 
+def test_openai_transport_malformed_success_is_internal_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, text="not-json"))
+        ),
+        max_retries=0,
+    )
+
+    with pytest.raises(InternalServerException) as exc_info:
+        transport.invoke(_request(), load_provider_profile("openai"), "gpt-test")
+
+    assert exc_info.value.response["ResponseMetadata"]["HTTPStatusCode"] == 500
+
+
+def test_openai_transport_invalid_success_schema_is_internal_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json={}))
+        ),
+        max_retries=0,
+    )
+
+    with pytest.raises(InternalServerException) as exc_info:
+        transport.invoke(_request(), load_provider_profile("openai"), "gpt-test")
+
+    assert exc_info.value.response["ResponseMetadata"]["HTTPStatusCode"] == 500
+
+
+def test_openai_transport_preserves_provider_access_denied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(403, json={"error": {"message": "denied"}})
+            )
+        ),
+        max_retries=0,
+    )
+
+    with pytest.raises(AccessDeniedException):
+        transport.invoke(_request(), load_provider_profile("openai"), "gpt-test")
+
+
 def test_openai_transport_stream(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
@@ -516,3 +623,172 @@ def test_openai_transport_stream(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
     assert events[-1].event_type == "metadata"
     assert events[-1].usage.total_tokens == 2
+
+
+def test_openai_transport_stream_retries_before_first_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return _stream_response('{"error":"busy"}', status_code=503)
+        return _stream_response(
+            'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        max_retries=1,
+    )
+
+    events = list(transport.invoke_stream(_request(), load_provider_profile("openai"), "gpt-test"))
+
+    assert calls == 2
+    assert events[-1].event_type == "message_stop"
+    assert events[-1].finish_reason == "end_turn"
+
+
+def test_openai_transport_stream_retries_provider_error_before_first_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return _stream_response('data: {"error":{"message":"busy","status":503}}\n\n')
+        return _stream_response(
+            'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n'
+        )
+
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        max_retries=1,
+    )
+
+    events = list(transport.invoke_stream(_request(), load_provider_profile("openai"), "gpt-test"))
+
+    assert calls == 2
+    assert events[-1].event_type == "message_stop"
+
+
+def test_openai_transport_stream_error_after_output_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return _stream_response(
+            'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}\n\n'
+            'data: {"error":{"message":"upstream failed","status":503}}\n\n'
+        )
+
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        max_retries=2,
+    )
+    events = transport.invoke_stream(_request(), load_provider_profile("openai"), "gpt-test")
+
+    assert next(events).event_type == "message_start"
+    assert next(events).event_type == "content_block_start"
+    assert next(events).text_delta == "partial"
+    with pytest.raises(ServiceUnavailableException, match="upstream failed"):
+        next(events)
+    assert calls == 1
+
+
+def test_openai_transport_stream_rejects_incomplete_or_malformed_protocol(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    responses = iter(
+        [
+            _stream_response(
+                'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}\n\n'
+            ),
+            _stream_response("data: nope\n\n"),
+        ]
+    )
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(lambda request: next(responses))),
+        max_retries=0,
+    )
+
+    with pytest.raises(ModelStreamErrorException, match="without a finish reason"):
+        list(transport.invoke_stream(_request(), load_provider_profile("openai"), "gpt-test"))
+    with pytest.raises(ModelStreamErrorException, match="malformed SSE JSON"):
+        list(transport.invoke_stream(_request(), load_provider_profile("openai"), "gpt-test"))
+
+
+def test_openai_transport_stream_uses_unique_text_and_tool_indexes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _stream_response(
+            'data: {"choices":[{"delta":{"content":"checking"},"finish_reason":null}]}\n\n'
+            'data: {"choices":[{"delta":{"tool_calls":['
+            '{"index":0,"id":"call_1","function":{"name":"lookup","arguments":"{\\"q\\":"}},'
+            '{"index":1,"id":"call_2","function":{"name":"other","arguments":"{}"}}'
+            ']},"finish_reason":null}]}\n\n'
+            'data: {"choices":[{"delta":{"tool_calls":['
+            '{"index":0,"function":{"arguments":"\\"x\\"}"}}'
+            ']},"finish_reason":"tool_calls"}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    events = list(transport.invoke_stream(_request(), load_provider_profile("openai"), "gpt-test"))
+
+    starts = [event for event in events if event.event_type == "content_block_start"]
+    stops = [event for event in events if event.event_type == "content_block_stop"]
+    assert [(event.content_block_index, event.content_block_type) for event in starts] == [
+        (0, "text"),
+        (1, "tool_use"),
+        (2, "tool_use"),
+    ]
+    assert [event.content_block_index for event in stops] == [0, 1, 2]
+    tool_deltas = [event for event in events if event.tool_arguments_delta is not None]
+    assert [(event.content_block_index, event.tool_call_id) for event in tool_deltas] == [
+        (1, "call_1"),
+        (2, "call_2"),
+        (1, "call_1"),
+    ]
+
+
+def test_openai_transport_stream_allocates_text_after_tool_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _stream_response(
+            'data: {"choices":[{"delta":{"tool_calls":['
+            '{"index":0,"id":"call_1","function":{"name":"lookup","arguments":"{}"}}'
+            ']},"finish_reason":null}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}\n\n'
+        )
+
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    events = list(transport.invoke_stream(_request(), load_provider_profile("openai"), "gpt-test"))
+
+    starts = [event for event in events if event.event_type == "content_block_start"]
+    assert [(event.content_block_index, event.content_block_type) for event in starts] == [
+        (0, "tool_use"),
+        (1, "text"),
+    ]

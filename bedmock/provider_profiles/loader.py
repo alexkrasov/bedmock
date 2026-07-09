@@ -29,6 +29,7 @@ class ProviderProfile:
     output_token_parameter: dict[str, Any] = field(default_factory=dict)
     token_counting: dict[str, Any] = field(default_factory=dict)
     model_overrides: list[dict[str, Any]] = field(default_factory=list)
+    bedrock_controls: dict[str, str] = field(default_factory=lambda: {"mode": "fail"})
 
     @property
     def endpoint_url(self) -> str:
@@ -52,6 +53,23 @@ class ProviderProfile:
         return headers
 
 
+def _bedrock_controls_from_dict(raw: dict[str, Any]) -> dict[str, str]:
+    value = raw.get("bedrock_controls", {})
+    if not isinstance(value, dict):
+        raise ConfigurationError("Provider profile bedrock_controls must be an object")
+    unknown = sorted(set(value) - {"mode"})
+    if unknown:
+        raise ConfigurationError(
+            "Provider profile bedrock_controls has unknown fields: " + ", ".join(unknown)
+        )
+    mode = value.get("mode", "fail")
+    if mode not in {"fail", "passthrough"}:
+        raise ConfigurationError(
+            "Provider profile bedrock_controls.mode must be 'fail' or 'passthrough'"
+        )
+    return {"mode": str(mode)}
+
+
 def _profile_from_dict(raw: dict[str, Any]) -> ProviderProfile:
     missing = [
         field_name
@@ -73,6 +91,7 @@ def _profile_from_dict(raw: dict[str, Any]) -> ProviderProfile:
         output_token_parameter=dict(raw.get("output_token_parameter", {})),
         token_counting=dict(raw.get("token_counting", {})),
         model_overrides=list(raw.get("model_overrides", [])),
+        bedrock_controls=_bedrock_controls_from_dict(raw),
     )
 
 

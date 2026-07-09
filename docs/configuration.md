@@ -72,6 +72,39 @@ The `providers` object overrides built-in or custom provider profiles after they
 objects such as `parameter_policy` are replaced as complete sections, so include the full local
 policy you want Bedmock to use.
 
+## Unsupported Bedrock Controls
+
+Some Bedrock Runtime operation fields describe AWS-specific controls rather than model input. For
+`invoke_model` and `invoke_model_with_response_stream`, Bedmock recognizes `trace`,
+`guardrailIdentifier`, `guardrailVersion`, `performanceConfigLatency`, `requestMetadata`, and
+`serviceTier`.
+
+Choose the behavior per provider in `bedmock.json`:
+
+```json
+{
+  "providers": {
+    "openai": {
+      "bedrock_controls": {"mode": "fail"}
+    },
+    "openrouter": {
+      "bedrock_controls": {"mode": "passthrough"}
+    }
+  }
+}
+```
+
+- `fail` is the default. Any control not mapped by the selected transport raises
+  `ValidationException` before API-key lookup or network I/O.
+- `passthrough` keeps the control fields in the canonical request so a transport plugin can map
+  them. If the selected transport does not forward some fields, the request proceeds and Bedmock
+  emits one `BedmockCompatibilityWarning` listing the dropped fields.
+
+The built-in `openai_chat_completions` transport currently maps none of these AWS-specific
+controls. Use `passthrough` only when accepting an explicit warning and provider-side omission is
+appropriate. Bedmock does not implement AWS Guardrails locally and never silently claims that an
+unmapped guardrail was applied.
+
 See `examples/bedmock.json` for a larger copyable example with multiple routes and provider
 overrides. The example contains no secrets; put API keys in environment variables such as
 `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, and `GROQ_API_KEY`.

@@ -25,6 +25,27 @@ def test_env_config_and_provider_profile(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert route.target_model == "gemini-test"
     assert profile.endpoint_url.endswith("/chat/completions")
     assert profile.api_key() == "secret"
+    assert profile.bedrock_controls == {"mode": "fail"}
+
+
+def test_provider_bedrock_controls_override_and_validation() -> None:
+    profile = load_provider_profile(
+        "openai",
+        overrides={"openai": {"bedrock_controls": {"mode": "passthrough"}}},
+    )
+    assert profile.bedrock_controls == {"mode": "passthrough"}
+
+    with pytest.raises(ConfigurationError, match="must be 'fail' or 'passthrough'"):
+        load_provider_profile(
+            "openai",
+            overrides={"openai": {"bedrock_controls": {"mode": "ignore"}}},
+        )
+
+    with pytest.raises(ConfigurationError, match="unknown fields: enabled"):
+        load_provider_profile(
+            "openai",
+            overrides={"openai": {"bedrock_controls": {"enabled": True}}},
+        )
 
 
 def test_load_env_file_parses_dotenv_file(tmp_path: object) -> None:
@@ -141,3 +162,4 @@ def test_example_bedmock_json_loads_and_routes(
     assert route.provider_id == "openai"
     assert route.source_codec == "anthropic_messages"
     assert groq_route.provider_id == "groq"
+    assert config.provider_overrides["openrouter"]["bedrock_controls"]["mode"] == "passthrough"

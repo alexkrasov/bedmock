@@ -59,6 +59,16 @@ Prompt cache telemetry from OpenAI-compatible providers is mapped to Bedrock usa
 provider returns it: `cached_tokens` becomes `cacheReadInputTokens`, and `cache_write_tokens`
 becomes `cacheWriteInputTokens`.
 
+Recognized InvokeModel controls are preserved separately from model content. Provider policy
+decides whether an unmapped control fails closed or proceeds with `BedmockCompatibilityWarning`;
+see `docs/configuration.md`. Unknown operation keyword arguments always fail validation instead of
+being silently discarded.
+
+Streaming responses require a provider `finish_reason` before Bedmock emits successful terminal
+events. Provider error events, malformed SSE, and incomplete EOFs surface as Bedrock-style client
+errors. Retries are allowed only before the first canonical event is yielded, so already-visible
+tokens are never duplicated by an automatic retry.
+
 ## Tooling Compatibility
 
 Bedmock supports client-side tool use as a compatibility mapping layer. It does not execute tools.

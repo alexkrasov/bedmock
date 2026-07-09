@@ -15,6 +15,31 @@ from .base import (
     streaming_body_from_json,
 )
 
+INVOKE_MODEL_ARGUMENTS = frozenset(
+    {
+        "accept",
+        "body",
+        "contentType",
+        "guardrailIdentifier",
+        "guardrailVersion",
+        "modelId",
+        "performanceConfigLatency",
+        "requestMetadata",
+        "serviceTier",
+        "trace",
+    }
+)
+INVOKE_MODEL_CONTROL_ARGUMENTS = frozenset(
+    {
+        "guardrailIdentifier",
+        "guardrailVersion",
+        "performanceConfigLatency",
+        "requestMetadata",
+        "serviceTier",
+        "trace",
+    }
+)
+
 
 class InvokeModelOperationCodec:
     operation_name = "InvokeModel"
@@ -27,6 +52,12 @@ class InvokeModelOperationCodec:
         arguments: dict[str, Any],
         context: OperationContext,
     ) -> CanonicalRequest:
+        unknown = sorted(set(arguments) - INVOKE_MODEL_ARGUMENTS)
+        if unknown:
+            raise ValidationException(
+                f"{self.operation_name} received unknown parameter(s): {', '.join(unknown)}",
+                operation_name=self.operation_name,
+            )
         content_type = arguments.get("contentType", "application/json")
         if content_type != "application/json":
             raise ValidationException("Only application/json invoke_model contentType is supported")
@@ -48,6 +79,13 @@ class InvokeModelOperationCodec:
                 "route_id": context.route.route_id,
             }
         )
+        controls = {
+            name: arguments[name]
+            for name in INVOKE_MODEL_CONTROL_ARGUMENTS
+            if name in arguments and arguments[name] is not None
+        }
+        if controls:
+            request.extensions["bedrock_controls"] = controls
         return request
 
     def encode_operation_response(

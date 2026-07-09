@@ -9,6 +9,10 @@ from botocore.exceptions import ClientError
 from .logging_utils import safe_error_message
 
 
+class BedmockCompatibilityWarning(UserWarning):
+    """Warning emitted when compatibility mode drops an unsupported Bedrock field."""
+
+
 class BedmockError(ClientError):
     """Base class for Bedrock Runtime compatibility errors."""
 
@@ -62,6 +66,11 @@ class ModelTimeoutException(BedmockError):
     status_code = 504
 
 
+class ModelStreamErrorException(BedmockError):
+    code = "ModelStreamErrorException"
+    status_code = 424
+
+
 class ServiceUnavailableException(BedmockError):
     code = "ServiceUnavailableException"
     status_code = 503
@@ -104,6 +113,7 @@ class ExceptionsNamespace:
     AccessDeniedException = AccessDeniedException
     ThrottlingException = ThrottlingException
     ModelTimeoutException = ModelTimeoutException
+    ModelStreamErrorException = ModelStreamErrorException
     ServiceUnavailableException = ServiceUnavailableException
     InternalServerException = InternalServerException
     ResourceNotFoundException = ResourceNotFoundException

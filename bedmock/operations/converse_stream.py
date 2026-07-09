@@ -46,9 +46,10 @@ class ConverseStreamOperationCodec(ConverseOperationCodec):
         if event.event_type == "message_start":
             return {"messageStart": {"role": "assistant"}}
         if event.event_type == "content_block_start":
-            content_block_start: dict[str, Any] = {"contentBlockIndex": index, "start": {}}
-            if event.content_block_type == "tool_use":
-                content_block_start = {
+            if event.content_block_type != "tool_use":
+                return None
+            return {
+                "contentBlockStart": {
                     "contentBlockIndex": index,
                     "start": {
                         "toolUse": {
@@ -57,7 +58,7 @@ class ConverseStreamOperationCodec(ConverseOperationCodec):
                         }
                     },
                 }
-            return {"contentBlockStart": content_block_start}
+            }
         if event.event_type == "content_block_delta":
             delta: dict[str, Any]
             if event.reasoning_delta is not None:

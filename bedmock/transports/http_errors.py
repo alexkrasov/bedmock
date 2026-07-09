@@ -7,8 +7,8 @@ from typing import Any
 import httpx
 
 from bedmock.exceptions import (
-    AccessDeniedException,
     BedmockError,
+    InternalServerException,
     ModelTimeoutException,
     ServiceUnavailableException,
     error_from_http_status,
@@ -73,4 +73,4 @@ def map_network_error(exc: Exception, operation_name: str) -> BedmockError:
         )
     if isinstance(exc, httpx.HTTPError):
         return ServiceUnavailableException(str(exc), operation_name=operation_name)
-    return AccessDeniedException(str(exc), operation_name=operation_name)
+    return InternalServerException(str(exc), operation_name=operation_name)
