@@ -12,6 +12,7 @@ class CanonicalTool:
     description: str | None
     input_schema: dict[str, Any]
     metadata: dict[str, Any] = field(default_factory=dict)
+    strict: bool | None = None
 
 
 @dataclass

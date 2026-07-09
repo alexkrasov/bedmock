@@ -11,7 +11,11 @@ from bedmock.canonical import (
     CanonicalUsage,
 )
 from bedmock.codecs import DEFAULT_CODEC_REGISTRY
-from bedmock.codecs.utils import converse_content_to_blocks
+from bedmock.codecs.utils import (
+    converse_content_to_blocks,
+    tools_from_anthropic,
+    tools_from_converse,
+)
 from bedmock.exceptions import ValidationException
 
 
@@ -113,3 +117,57 @@ def test_converse_cache_point_decodes_and_validates() -> None:
 
     with pytest.raises(ValidationException, match=r"cachePoint\.ttl"):
         converse_content_to_blocks([{"cachePoint": {"type": "default", "ttl": "24h"}}])
+
+
+def test_tool_strict_flags_decode_from_supported_shapes() -> None:
+    anthropic_tools = tools_from_anthropic(
+        [
+            {
+                "name": "lookup",
+                "description": "Lookup",
+                "strict": True,
+                "input_schema": {"type": "object"},
+            }
+        ]
+    )
+    converse_tools = tools_from_converse(
+        {
+            "tools": [
+                {
+                    "toolSpec": {
+                        "name": "lookup",
+                        "description": "Lookup",
+                        "strict": True,
+                        "inputSchema": {"json": {"type": "object"}},
+                    }
+                }
+            ]
+        }
+    )
+    missing_strict = tools_from_anthropic([{"name": "search", "input_schema": {"type": "object"}}])
+
+    assert anthropic_tools[0].strict is True
+    assert converse_tools[0].strict is True
+    assert missing_strict[0].strict is None
+
+
+def test_tool_strict_requires_boolean() -> None:
+    with pytest.raises(ValidationException, match=r"tools\[\]\.strict"):
+        tools_from_anthropic(
+            [{"name": "lookup", "strict": "true", "input_schema": {"type": "object"}}]
+        )
+
+    with pytest.raises(ValidationException, match=r"toolConfig\.tools\[\]"):
+        tools_from_converse(
+            {
+                "tools": [
+                    {
+                        "toolSpec": {
+                            "name": "lookup",
+                            "strict": "true",
+                            "inputSchema": {"json": {"type": "object"}},
+                        }
+                    }
+                ]
+            }
+        )

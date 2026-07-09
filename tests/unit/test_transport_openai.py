@@ -16,7 +16,11 @@ from bedmock.canonical import (
     CanonicalToolChoice,
 )
 from bedmock.canonical.usage import CanonicalUsage
-from bedmock.exceptions import ServiceUnavailableException, UnsupportedOperationException
+from bedmock.exceptions import (
+    ServiceUnavailableException,
+    UnsupportedOperationException,
+    ValidationException,
+)
 from bedmock.provider_profiles import load_provider_profile
 from bedmock.transports.openai_chat_completions import OpenAIChatCompletionsTransport
 
@@ -73,6 +77,38 @@ def _cache_point_request(ttl: str | None = None) -> CanonicalRequest:
         response_format=None,
         stream=False,
         metadata={"operation": "Converse"},
+        extensions={},
+    )
+
+
+def _strict_tool_request() -> CanonicalRequest:
+    return CanonicalRequest(
+        messages=[CanonicalMessage("user", [CanonicalTextBlock("look up account 123")])],
+        system=[],
+        source_model_id="anthropic.claude-3-haiku-20240307-v1:0",
+        target_model="gpt-test",
+        max_output_tokens=12,
+        temperature=None,
+        top_p=None,
+        top_k=None,
+        stop_sequences=[],
+        tools=[
+            CanonicalTool(
+                "lookup",
+                "Lookup",
+                {
+                    "type": "object",
+                    "properties": {"account_id": {"type": "string"}},
+                    "required": ["account_id"],
+                    "additionalProperties": False,
+                },
+                strict=True,
+            )
+        ],
+        tool_choice=CanonicalToolChoice("specific", tool_name="lookup"),
+        response_format=None,
+        stream=False,
+        metadata={"operation": "InvokeModel"},
         extensions={},
     )
 
@@ -137,9 +173,102 @@ def test_openai_transport_payload_and_response(monkeypatch: pytest.MonkeyPatch) 
     assert payload["max_tokens"] == 12
     assert payload["messages"][1]["content"][1]["image_url"]["url"].startswith("data:image/png")
     assert payload["tool_choice"]["function"]["name"] == "lookup"
+    assert "strict" not in payload["tools"][0]["function"]
     assert payload["response_format"]["json_schema"]["strict"] is True
     assert response.content[0].text == "done"
     assert response.usage == CanonicalUsage(10, 2, 12, reasoning_tokens=0, cached_input_tokens=1)
+
+
+def test_openai_transport_payload_includes_strict_tool_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["json"] = json.loads(request.content)
+        return httpx.Response(200, json=_ok_chat_response())
+
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    transport.invoke(_strict_tool_request(), load_provider_profile("openai"), "gpt-test")
+
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    assert payload["tools"][0]["function"]["strict"] is True
+    assert payload["tools"][0]["function"]["parameters"]["additionalProperties"] is False
+
+
+def test_strict_parameters_rejects_unresolved_strict_tool_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("strict capability validation should run before network")
+
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        strict_parameters=True,
+    )
+    profile = load_provider_profile(
+        "openai",
+        overrides={
+            "openai": {
+                "model_overrides": [
+                    {
+                        "model": "gpt-test",
+                        "capabilities": {
+                            "tools": True,
+                        },
+                    }
+                ]
+            }
+        },
+    )
+
+    with pytest.raises(ValidationException, match="strict_tool_schema"):
+        transport.invoke(_strict_tool_request(), profile, "gpt-test")
+
+
+def test_strict_parameters_allows_model_override_for_strict_tool_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["json"] = json.loads(request.content)
+        return httpx.Response(200, json=_ok_chat_response())
+
+    profile = load_provider_profile(
+        "openai",
+        overrides={
+            "openai": {
+                "model_overrides": [
+                    {
+                        "model": "gpt-test",
+                        "capabilities": {
+                            "tools": True,
+                            "strict_tool_schema": True,
+                        },
+                    }
+                ]
+            }
+        },
+    )
+    transport = OpenAIChatCompletionsTransport(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        strict_parameters=True,
+    )
+
+    transport.invoke(_strict_tool_request(), profile, "gpt-test")
+
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    assert payload["tools"][0]["function"]["strict"] is True
 
 
 def test_openrouter_cache_point_maps_to_cache_control(monkeypatch: pytest.MonkeyPatch) -> None:

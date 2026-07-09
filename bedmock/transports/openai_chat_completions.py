@@ -23,11 +23,13 @@ from bedmock.canonical import (
     CanonicalResponseFormat,
     CanonicalStreamEvent,
     CanonicalTextBlock,
+    CanonicalTool,
     CanonicalToolChoice,
     CanonicalToolResultBlock,
     CanonicalToolUseBlock,
     CanonicalUsage,
 )
+from bedmock.capabilities import resolve_capability
 from bedmock.exceptions import (
     AccessDeniedException,
     UnsupportedOperationException,
@@ -377,15 +379,18 @@ class OpenAIChatCompletionsTransport:
         return self._tool_result_content(request.system)
 
     def _responses_tools(self, request: CanonicalRequest) -> list[dict[str, Any]]:
-        return [
-            {
+        tools: list[dict[str, Any]] = []
+        for tool in request.tools:
+            item: dict[str, Any] = {
                 "type": "function",
                 "name": tool.name,
                 "description": tool.description or "",
                 "parameters": tool.input_schema,
             }
-            for tool in request.tools
-        ]
+            if tool.strict is not None:
+                item["strict"] = tool.strict
+            tools.append(item)
+        return tools
 
     def _responses_text_format(
         self,
@@ -613,24 +618,21 @@ class OpenAIChatCompletionsTransport:
         if stream:
             payload["stream"] = True
         if request.tools:
-            self._ensure_capability(request, provider, "tools")
-            payload["tools"] = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": tool.name,
-                        "description": tool.description or "",
-                        "parameters": tool.input_schema,
-                    },
-                }
-                for tool in request.tools
-            ]
+            self._ensure_capability(request, provider, target_model, "tools")
+            if any(tool.strict is not None for tool in request.tools):
+                self._ensure_capability(
+                    request,
+                    provider,
+                    target_model,
+                    "strict_tool_schema",
+                )
+            payload["tools"] = [self._chat_completion_tool(tool) for tool in request.tools]
         if request.tool_choice:
             payload["tool_choice"] = self._tool_choice(request)
             if request.tool_choice.disable_parallel_tool_calls is not None:
                 payload["parallel_tool_calls"] = not request.tool_choice.disable_parallel_tool_calls
         if request.response_format:
-            self._ensure_capability(request, provider, "structured_output")
+            self._ensure_capability(request, provider, target_model, "structured_output")
             payload["response_format"] = self._response_format(request.response_format)
 
         fixed = provider.parameter_policy.get("fixed_values", {})
@@ -845,6 +847,16 @@ class OpenAIChatCompletionsTransport:
             return {"type": "function", "function": {"name": choice.tool_name}}
         raise ValidationException(f"Unsupported tool choice mode: {choice.mode}")
 
+    def _chat_completion_tool(self, tool: CanonicalTool) -> dict[str, Any]:
+        function: dict[str, Any] = {
+            "name": tool.name,
+            "description": tool.description or "",
+            "parameters": tool.input_schema,
+        }
+        if tool.strict is not None:
+            function["strict"] = tool.strict
+        return {"type": "function", "function": function}
+
     def _response_format(self, response_format: CanonicalResponseFormat) -> dict[str, Any]:
         if response_format.mode == "json_object":
             return {"type": "json_object"}
@@ -862,9 +874,15 @@ class OpenAIChatCompletionsTransport:
         self,
         request: CanonicalRequest,
         provider: ProviderProfile,
+        target_model: str,
         capability: str,
     ) -> None:
-        value = provider.capabilities.get(capability, "unknown")
+        value = resolve_capability(
+            provider.capabilities,
+            capability,
+            model=target_model,
+            model_overrides=provider.model_overrides,
+        )
         if value is False or (self.strict_parameters and value in {"unknown", "model_dependent"}):
             raise ValidationException(
                 f"Provider {provider.id!r} capability {capability!r} is {value!r}; "

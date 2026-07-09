@@ -26,6 +26,11 @@ Optional fields:
 - `token_counting`
 - `model_overrides`
 
+Common capability keys include `tools`, `strict_tool_schema`, `vision`, `structured_output`,
+`reasoning`, `streaming`, and `token_counting`. Use `model_dependent` when support depends on the
+selected target model, and add `model_overrides` for models that are known to support or reject a
+capability.
+
 Place custom profiles in a directory and set:
 
 ```bash

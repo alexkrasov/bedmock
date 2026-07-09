@@ -69,6 +69,14 @@ def validate_base64_image(media_type: str, data_base64: str, *, max_bytes: int) 
         raise ValidationException("Image data exceeds BEDMOCK_MAX_IMAGE_BYTES")
 
 
+def optional_bool(value: Any, field: str) -> bool | None:
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise ValidationException(f"{field} must be boolean")
+    return value
+
+
 def anthropic_content_to_blocks(content: Any) -> list[CanonicalContentBlock]:
     if isinstance(content, str):
         return [CanonicalTextBlock(content)]
@@ -321,6 +329,7 @@ def tools_from_anthropic(tools: Any) -> list[CanonicalTool]:
                 description=tool.get("description"),
                 input_schema=dict(tool.get("input_schema") or {}),
                 metadata={"source": "anthropic"},
+                strict=optional_bool(tool.get("strict"), "tools[].strict"),
             )
         )
     return result
@@ -344,6 +353,7 @@ def tools_from_converse(tool_config: Any) -> list[CanonicalTool]:
                 description=spec.get("description"),
                 input_schema=dict(input_schema),
                 metadata={"source": "converse"},
+                strict=optional_bool(spec.get("strict"), "toolConfig.tools[].toolSpec.strict"),
             )
         )
     return result

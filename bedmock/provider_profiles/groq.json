@@ -9,6 +9,7 @@
     "chat_completions": true,
     "streaming": true,
     "tools": "model_dependent",
+    "strict_tool_schema": "model_dependent",
     "vision": "model_dependent",
     "structured_output": "model_dependent",
     "reasoning": "model_dependent",

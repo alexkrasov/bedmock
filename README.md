@@ -193,6 +193,17 @@ reference or contract coverage.
 | `converse_stream` | Implemented with ConverseStream taxonomy | Usage appears only if provider emits it | Missing usage remains absent |
 | `count_tokens` | Implemented for exact strategies | OpenAI and Gemini have built-in provider-native counters; OpenRouter and Groq do not expose one in Bedmock yet | `UnsupportedOperationException` when no exact strategy exists |
 
+## Tooling And Structured Output
+
+Bedmock maps client-side tool definitions, tool choice, tool calls, tool results, structured output,
+and strict tool schema fields where the selected source codec and provider transport support them.
+It does not execute tools; application code still runs the tool and returns the result to the
+conversation. Provider/model support remains model-dependent for the built-in OpenAI-compatible
+profiles.
+
+See `docs/compatibility.md` for the tooling compatibility matrix, including `strict_tool_schema`
+capability behavior.
+
 ## Prompt Cache Compatibility
 
 Bedrock Converse `cachePoint` blocks are accepted and never sent to the target model as prompt text.

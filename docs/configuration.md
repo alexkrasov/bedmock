@@ -58,6 +58,10 @@ fail before network calls. Compatibility mode can attempt model-dependent capabi
 warning in request metadata, but it never drops system prompts, tools, stop sequences, response
 formats, multimodal blocks, or output token limits silently.
 
+Strict tool schema requests are controlled separately from normal tool-use requests. If a request
+includes `strict: true` or `strict: false` on a tool definition, strict-parameter mode requires the
+selected provider profile or model override to support the `strict_tool_schema` capability.
+
 ## Delegating Other AWS Services
 
 By default, Bedmock only implements `boto3.client("bedrock-runtime")`. Calls such as
